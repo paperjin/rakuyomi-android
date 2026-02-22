@@ -15,7 +15,27 @@ local MangaReader = require("MangaReader")
 local Testing = require("testing")
 
 logger.info("Loading Rakuyomi plugin...")
-local backendInitialized, logs = Backend.initialize()
+
+-- Defer backend initialization to avoid crashes during plugin load
+-- This allows the plugin to register even if backend fails later
+local backendInitialized = false
+local backendLogs = nil
+
+local function tryInitializeBackend()
+    if not backendInitialized then
+        local ok, result, logs = pcall(Backend.initialize)
+        if ok then
+            backendInitialized = result
+            backendLogs = logs
+            logger.info("Rakuyomi backend initialized successfully")
+        else
+            logger.warn("Rakuyomi backend initialization failed: " .. tostring(result))
+            backendInitialized = false
+            backendLogs = tostring(result)
+        end
+    end
+    return backendInitialized
+end
 
 local Rakuyomi = InputContainer:extend({
   name = "rakuyomi"
@@ -26,6 +46,9 @@ local Rakuyomi = InputContainer:extend({
 -- - when the `ReaderUI` is initialized, we're also called
 -- so we should register to the menu accordingly
 function Rakuyomi:init()
+  -- Try to initialize backend (won't crash if it fails)
+  tryInitializeBackend()
+  
   if self.ui.name == "ReaderUI" then
     MangaReader:initializeFromReaderUI(self.ui)
   else
@@ -42,6 +65,8 @@ function Rakuyomi:init()
 
   Testing:init()
   Testing:emitEvent('initialized')
+  
+  logger.info("Rakuyomi plugin initialized (backend: " .. tostring(backendInitialized) .. ")")
 end
 
 function Rakuyomi:onStartLibraryView()
