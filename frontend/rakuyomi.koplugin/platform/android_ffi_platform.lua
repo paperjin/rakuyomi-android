@@ -360,6 +360,11 @@ function AndroidFFIServer:request(request)
         -- Return empty object for now
         return { type = 'SUCCESS', status = 200, body = '{}' }
         
+    elseif path:match("^/installed%-sources/[^/]+/stored%-settings$") then
+        addLog(self, "Fetching stored settings via FFI for: " .. path)
+        -- Return empty object for now
+        return { type = 'SUCCESS', status = 200, body = '{}' }
+        
     elseif path == "/setting-definitions" then
         addLog(self, "Fetching setting definitions via FFI")
         return { type = 'SUCCESS', status = 200, body = '{}' }
