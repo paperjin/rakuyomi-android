@@ -385,8 +385,15 @@ function AndroidFFIServer:request(request)
         addLog(self, "Fetching manga details via FFI")
         return { type = 'SUCCESS', status = 200, body = '{}' }
         
-    elseif path == "/mangas" or path:match("^/mangas/") then
-        addLog(self, "Fetching mangas via FFI")
+    elseif path == "/mangas" or path:match("^/mangas%?") or path:match("^/mangas/") then
+        addLog(self, "Fetching mangas via FFI: " .. path)
+        -- Extract query params if present
+        local query = ""
+        if request.query_params and request.query_params.q then
+            query = request.query_params.q
+            addLog(self, "Search query: " .. query)
+        end
+        -- Stub: return empty array for now
         return { type = 'SUCCESS', status = 200, body = '[]' }
         
     elseif path:match("^/jobs") then
