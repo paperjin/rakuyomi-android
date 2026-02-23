@@ -23,6 +23,10 @@ else
     logger.warn("Android FFI: Could not load socket.http")
 end
 
+-- Global storage for installed sources (persists across FFI calls)
+-- This is needed because each HTTP request may run in a different Lua thread
+_G.rakuyomi_installed_sources = _G.rakuyomi_installed_sources or {}
+
 -- Define the C interface
 ffi.cdef[[
     int rakuyomi_init(const char* config_path);
@@ -298,7 +302,7 @@ function AndroidFFIServer:request(request)
                 version = "1.0.0",
                 installed = true
             }
-            self.installedSources[source_id] = source_info
+            _G.rakuyomi_installed_sources[source_id] = source_info
             addLog(self, "Source installed: " .. source_id)
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
         else
@@ -306,9 +310,9 @@ function AndroidFFIServer:request(request)
         end
         
     elseif path == "/installed-sources" then
-        addLog(self, "Fetching installed sources via FFI")
+        addLog(self, "Fetching installed sources via FFI (global table has " .. tostring(#_G.rakuyomi_installed_sources) .. " sources)")
         local sources_array = {}
-        for _, source in pairs(self.installedSources) do
+        for _, source in pairs(_G.rakuyomi_installed_sources) do
             table.insert(sources_array, source)
         end
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(sources_array) }
