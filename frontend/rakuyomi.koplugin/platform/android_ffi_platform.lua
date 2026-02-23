@@ -108,6 +108,8 @@ function AndroidFFIServer:request(request)
     -- Parse path to determine what function to call
     -- Path format: /api/{entity}/{action}
     
+    logger.warn("Rakuyomi REQUEST: " .. (method or "nil") .. " " .. (path or "nil"))
+    
     if path == "/health-check" then
         local ready = self.lib.rakuyomi_health_check()
         if ready == 1 then
@@ -285,9 +287,10 @@ function AndroidFFIServer:request(request)
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode(all_sources) }
         end
         
-    elseif path:match("^/available-sources/[^/]+/install$") then
+    elseif path:match("^/available%-sources/[^/]+/install$") then
         addLog(self, "Installing source via FFI: " .. path)
-        local source_id = path:match("/available-sources/([^/]+)/install")
+        logger.warn("Rakuyomi INSTALL CHECK: path=" .. path .. " pattern=" .. tostring(path:match("^/available%-sources/[^/]+/install$") or "nil"))
+        local source_id = path:match("/available%-sources/(.+)/install")
         if source_id then
             local source_info = {
                 id = source_id,
@@ -357,6 +360,7 @@ function AndroidFFIServer:request(request)
         
     else
         error_msg = "Unknown endpoint: " .. path
+        logger.warn("Rakuyomi UNKNOWN: " .. path)
     end
     
     if error_msg then
