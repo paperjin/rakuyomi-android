@@ -83,8 +83,11 @@ function SettingItemValue:createValueWidget()
       label_for_value[option.value] = option.label
     end
 
+    -- FIX: Handle nil value by using default or first option
+    local current_value = self:getCurrentValue() or self.value_definition.options[1].value
+
     return TextWidget:new {
-      text = label_for_value[self:getCurrentValue()] .. " " .. Icons.UNICODE_ARROW_RIGHT,
+      text = label_for_value[current_value] .. " " .. Icons.UNICODE_ARROW_RIGHT,
       editable = true,
       face = Font:getFace("cfont", SETTING_ITEM_FONT_SIZE),
       max_width = self.max_width,
@@ -144,8 +147,10 @@ function SettingItemValue:createValueWidget()
       max_width = self.max_width,
     }
   elseif self.value_definition.type == "path" then
+    -- FIX: Handle nil value with fallback to default or empty string
+    local current_value = self:getCurrentValue() or self.value_definition.default or ""
     return TextWidget:new {
-      text = self:getCurrentValue() .. " " .. Icons.UNICODE_ARROW_RIGHT,
+      text = current_value .. " " .. Icons.UNICODE_ARROW_RIGHT,
       editable = true,
       face = Font:getFace("cfont", SETTING_ITEM_FONT_SIZE),
       max_width = self.max_width,

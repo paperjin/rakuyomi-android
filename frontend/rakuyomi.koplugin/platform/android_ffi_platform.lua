@@ -16,6 +16,7 @@ ffi.cdef[[
     char* rakuyomi_get_pages(const char* source_id, const char* manga_id, const char* chapter_id);
     int rakuyomi_download_page(const char* source_id, const char* manga_id, const char* chapter_id, const char* page_url, const char* output_path);
     int rakuyomi_health_check(void);
+    char* rakuyomi_get_library(void);
     void rakuyomi_free_string(char* s);
 ]]
 
@@ -23,6 +24,8 @@ ffi.cdef[[
  local function load_rakuyomi_library()
     -- Possible library locations
     local search_paths = {
+        -- Internal app storage (Android requirement for namespace)
+        "/data/data/org.koreader.launcher/files/librakuyomi.so",
         -- In plugin directory
         Paths.getPluginDirectory() .. "/librakuyomi.so",
         Paths.getPluginDirectory() .. "/rakuyomi.so",
@@ -150,6 +153,10 @@ function AndroidFFIServer:request(request)
         else
             error_msg = "Missing source_id, manga_id, or chapter_id parameter"
         end
+        
+    elseif path == "/library" then
+        addLog(self, "Fetching library via FFI")
+        result_json = self.lib.rakuyomi_get_library()
         
     else
         error_msg = "Unknown endpoint: " .. path

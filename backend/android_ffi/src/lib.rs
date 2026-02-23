@@ -73,8 +73,9 @@ pub unsafe extern "C" fn rakuyomi_init(config_path: *const c_char) -> c_int {
         };
         
         if STATE.set(state).is_err() {
-            eprintln!("State already initialized");
-            return -6;
+            // State already initialized - this is OK for a retry
+            // Return success instead of error
+            return 0;
         }
         
         0 // Success
@@ -295,6 +296,14 @@ pub extern "C" fn rakuyomi_health_check() -> c_int {
     } else {
         0
     }
+}
+
+/// Get library manga list (stub - returns empty array)
+/// Returns JSON string (caller must free with rakuyomi_free_string)
+#[no_mangle]
+pub extern "C" fn rakuyomi_get_library() -> *mut c_char {
+    // Stub: return empty library for now
+    string_to_c_str("[]".to_string())
 }
 
 /// Free a string returned by other rakuyomi functions

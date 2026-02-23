@@ -1,0 +1,22 @@
+=== NETWORK ADB COMMANDS ===
+
+Step 1: Enable Wireles Debugging on Device
+- Settings → Developer options → Wireless debugging → Enable
+- Note: IP address (e.g., 192.168.0.102:5555)
+
+Step 2: Connect from Mac
+adb connect 192.168.0.102:5555
+
+Step 3: Verify connection
+adb devices
+
+Step 4: Install Rakuyomi (already built)
+adb push /Users/albert/.openclaw/workspace/rakuyomi-android/rakuyomi_android_FIXED.zip /sdcard/Download/
+adb shell "cd /sdcard/Download && rm -rf frontend && unzip -o rakuyomi_android_FIXED.zip"
+adb shell "rm -rf /sdcard/koreader/plugins/rakuyomi.koplugin"
+adb shell "mv /sdcard/Download/frontend/rakuyomi.koplugin /sdcard/koreader/plugins/"
+adb shell "ls -la /sdcard/koreader/plugins/rakuyomi.koplugin/libs/"
+
+Step 5: Restart KOReader on device
+
+Step 6: Test Settings 🎉

@@ -100,13 +100,14 @@ function Rakuyomi:addToMainMenu(menu_items)
 end
 
 function Rakuyomi:showErrorDialog()
+  local errorMsg = tostring(backendLogs or "No error details available.")
   ErrorDialog:show(
     _("Oops!") .. _("Rakuyomi encountered an issue while starting up!") .. "\n" ..
     _("Here are some messages that might help identify the problem:") .. "\n\n" ..
-    logs,
+    errorMsg,
     function()
       Backend.cleanup()
-      backendInitialized, logs = Backend.initialize()
+      backendInitialized, backendLogs = Backend.initialize()
     end
   )
 end
