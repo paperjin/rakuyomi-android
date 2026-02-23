@@ -17,6 +17,8 @@ ffi.cdef[[
     int rakuyomi_download_page(const char* source_id, const char* manga_id, const char* chapter_id, const char* page_url, const char* output_path);
     int rakuyomi_health_check(void);
     char* rakuyomi_get_library(void);
+    char* rakuyomi_get_settings(void);
+    int rakuyomi_set_settings(const char* settings_json);
     void rakuyomi_free_string(char* s);
 ]]
 
@@ -157,6 +159,23 @@ function AndroidFFIServer:request(request)
     elseif path == "/library" then
         addLog(self, "Fetching library via FFI")
         result_json = self.lib.rakuyomi_get_library()
+        
+    elseif path == "/settings" then
+        if method == "GET" then
+            addLog(self, "Fetching settings via FFI")
+            result_json = self.lib.rakuyomi_get_settings()
+        elseif method == "POST" or method == "PUT" then
+            addLog(self, "Setting settings via FFI")
+            local body_str = request.body or "{}"
+            local result = self.lib.rakuyomi_set_settings(body_str)
+            if result == 0 then
+                return { type = 'SUCCESS', status = 200, body = '{}' }
+            else
+                error_msg = "Failed to set settings (error: " .. tostring(result) .. ")"
+            end
+        else
+            error_msg = "Unsupported method for /settings: " .. tostring(method)
+        end
         
     else
         error_msg = "Unknown endpoint: " .. path

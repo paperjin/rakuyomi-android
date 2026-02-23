@@ -14,6 +14,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local _ = require("gettext+")
 local Paths = require("Paths")
 local Device = require("device")
+local JSON = require("json")
 
 local Backend = require("Backend")
 local ErrorDialog = require("ErrorDialog")

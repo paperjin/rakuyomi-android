@@ -306,6 +306,33 @@ pub extern "C" fn rakuyomi_get_library() -> *mut c_char {
     string_to_c_str("[]".to_string())
 }
 
+/// Get settings (stub - returns default settings)
+/// Returns JSON string (caller must free with rakuyomi_free_string)
+#[no_mangle]
+pub extern "C" fn rakuyomi_get_settings() -> *mut c_char {
+    // Return default settings as JSON
+    let settings = r#"{
+        "storage_path": null,
+        "webdav_url": null,
+        "enabled_cron_check_mangas_update": false,
+        "source_skip_cron": "",
+        "preload_chapters": 0,
+        "optimize_image": false,
+        "source_lists": [],
+        "languages": []
+    }"#;
+    string_to_c_str(settings.to_string())
+}
+
+/// Set settings (stub - just returns success)
+/// Returns 0 on success, -1 on error
+#[no_mangle]
+pub extern "C" fn rakuyomi_set_settings(_settings_json: *const c_char) -> c_int {
+    // Stub: just return success
+    // In real implementation, this would parse and save settings
+    0
+}
+
 /// Free a string returned by other rakuyomi functions
 #[no_mangle]
 pub unsafe extern "C" fn rakuyomi_free_string(s: *mut c_char) {

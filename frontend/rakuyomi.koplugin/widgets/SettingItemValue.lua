@@ -120,8 +120,10 @@ function SettingItemValue:createValueWidget()
       face = Font:getFace("smallinfofont", SETTING_ITEM_FONT_SIZE),
     }
   elseif self.value_definition.type == "integer" then
+    -- FIX: Handle nil value with fallback to 0
+    local current_value = self:getCurrentValue() or 0
     return TextWidget:new {
-      text = self:getCurrentValue() .. (self.value_definition.unit and (' ' .. self.value_definition.unit) or '') .. ' ' .. Icons.UNICODE_ARROW_RIGHT,
+      text = current_value .. (self.value_definition.unit and (' ' .. self.value_definition.unit) or '') .. ' ' .. Icons.UNICODE_ARROW_RIGHT,
       editable = true,
       face = Font:getFace("cfont", SETTING_ITEM_FONT_SIZE),
       max_width = self.max_width,
