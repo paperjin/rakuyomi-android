@@ -62,6 +62,8 @@ function AndroidFFIServer:new(lib)
         lib = lib,
         logBuffer = {},
         maxLogLines = 100,
+        -- Store for installed sources (in-memory only for now)
+        installedSources = {},
     }
     setmetatable(server, { __index = AndroidFFIServer })
     return server
@@ -167,13 +169,65 @@ function AndroidFFIServer:request(request)
         
     elseif path == "/available-sources" then
         addLog(self, "Fetching available sources via FFI")
-        -- Stub: return empty array
-        return { type = 'SUCCESS', status = 200, body = '[]' }
+        -- Return mock available sources
+        local mock_sources = {
+            {
+                id = "mangadex",
+                name = "MangaDex",
+                version = "1.4.0",
+                description = "Multi-language manga source",
+                author = "MangaDex",
+                lang = "en",
+                installed = false
+            },
+            {
+                id = "mangakakalot",
+                name = "MangaKakalot",
+                version = "1.4.0",
+                description = "Popular manga source",
+                author = "MangaKakalot",
+                lang = "en",
+                installed = false
+            },
+            {
+                id = "webtoons",
+                name = "Webtoons",
+                version = "1.4.0",
+                description = "Official Webtoon source",
+                author = "Webtoon",
+                lang = "en",
+                installed = false
+            }
+        }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_sources) }
+        
+    elseif path:match("^/available-sources/[^/]+/install$") then
+        addLog(self, "Installing source via FFI: " .. path)
+        -- Extract source_id from path (e.g., /available-sources/mangadex/install)
+        local source_id = path:match("/available-sources/([^/]+)/install")
+        if source_id then
+            -- Store the installed source
+            local source_info = {
+                id = source_id,
+                name = source_id:gsub("^%l", string.upper), -- Capitalize first letter
+                version = "1.0.0",
+                installed = true
+            }
+            self.installedSources[source_id] = source_info
+            addLog(self, "Source installed: " .. source_id)
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
+        else
+            return { type = 'ERROR', status = 400, message = "Invalid source ID", body = '{"error": "Invalid source ID"}' }
+        end
         
     elseif path == "/installed-sources" then
         addLog(self, "Fetching installed sources via FFI")
-        -- Stub: return empty array
-        return { type = 'SUCCESS', status = 200, body = '[]' }
+        -- Return installed sources as array
+        local sources_array = {}
+        for _, source in pairs(self.installedSources) do
+            table.insert(sources_array, source)
+        end
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(sources_array) }
         
     elseif path == "/setting-definitions" then
         addLog(self, "Fetching setting definitions via FFI")
