@@ -10,6 +10,8 @@ use tokio::sync::Mutex;
 struct AppState {
     config_dir: PathBuf,
     initialized: bool,
+    settings: Mutex<String>, // Store settings as JSON string
+    settings_file: PathBuf,
 }
 
 static RUNTIME: OnceCell<Runtime> = OnceCell::new();
@@ -66,10 +68,32 @@ pub unsafe extern "C" fn rakuyomi_init(config_path: *const c_char) -> c_int {
         let _ = tokio::fs::create_dir_all(config_dir.join("sources")).await;
         let _ = tokio::fs::create_dir_all(config_dir.join("downloads")).await;
         
+        // Settings file path
+        let settings_file = config_dir.join("settings.json");
+        
+        // Try to load existing settings or use defaults
+        let settings_content = if settings_file.exists() {
+            match tokio::fs::read_to_string(&settings_file).await {
+                Ok(content) => {
+                    eprintln!("Loaded settings from {:?}", settings_file);
+                    content
+                }
+                Err(e) => {
+                    eprintln!("Failed to read settings file: {}, using defaults", e);
+                    get_default_settings()
+                }
+            }
+        } else {
+            eprintln!("No settings file found at {:?}, using defaults", settings_file);
+            get_default_settings()
+        };
+        
         // Create and store global state
         let state = AppState {
-            config_dir,
+            config_dir: config_dir.clone(),
             initialized: true,
+            settings: Mutex::new(settings_content),
+            settings_file,
         };
         
         if STATE.set(state).is_err() {
@@ -82,6 +106,20 @@ pub unsafe extern "C" fn rakuyomi_init(config_path: *const c_char) -> c_int {
     });
     
     result
+}
+
+/// Get default settings JSON
+fn get_default_settings() -> String {
+    r#"{
+        "storage_path": null,
+        "webdav_url": null,
+        "enabled_cron_check_mangas_update": false,
+        "source_skip_cron": "",
+        "preload_chapters": 0,
+        "optimize_image": false,
+        "source_lists": [],
+        "languages": []
+    }"#.to_string()
 }
 
 /// Get global state
@@ -307,30 +345,63 @@ pub extern "C" fn rakuyomi_get_library() -> *mut c_char {
 }
 
 /// Get settings (stub - returns default settings)
+/// Returns stored settings as JSON string
 /// Returns JSON string (caller must free with rakuyomi_free_string)
 #[no_mangle]
 pub extern "C" fn rakuyomi_get_settings() -> *mut c_char {
-    // Return default settings as JSON
-    let settings = r#"{
-        "storage_path": null,
-        "webdav_url": null,
-        "enabled_cron_check_mangas_update": false,
-        "source_skip_cron": "",
-        "preload_chapters": 0,
-        "optimize_image": false,
-        "source_lists": [],
-        "languages": []
-    }"#;
-    string_to_c_str(settings.to_string())
+    if let Some(state) = get_state() {
+        let runtime = get_runtime();
+        runtime.block_on(async {
+            let settings = state.settings.lock().await;
+            string_to_c_str(settings.clone())
+        })
+    } else {
+        // Return defaults if state not initialized
+        string_to_c_str(get_default_settings())
+    }
 }
 
-/// Set settings (stub - just returns success)
+/// Set settings (saves to file)
 /// Returns 0 on success, -1 on error
 #[no_mangle]
-pub extern "C" fn rakuyomi_set_settings(_settings_json: *const c_char) -> c_int {
-    // Stub: just return success
-    // In real implementation, this would parse and save settings
-    0
+pub extern "C" fn rakuyomi_set_settings(settings_json: *const c_char) -> c_int {
+    let settings_str = match unsafe { c_str_to_string(settings_json) } {
+        Some(s) => s,
+        None => return -1, // Invalid input
+    };
+    
+    if let Some(state) = get_state() {
+        let runtime = get_runtime();
+        runtime.block_on(async {
+            // Validate JSON by parsing it
+            match serde_json::from_str::<serde_json::Value>(&settings_str) {
+                Ok(_) => {
+                    // Update in-memory settings
+                    let mut settings = state.settings.lock().await;
+                    *settings = settings_str.clone();
+                    drop(settings); // Release lock before file operation
+                    
+                    // Save to file
+                    match tokio::fs::write(&state.settings_file, settings_str).await {
+                        Ok(_) => {
+                            eprintln!("Settings saved to {:?}", state.settings_file);
+                            0 // Success
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save settings: {}", e);
+                            -2 // File write error
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Invalid JSON in settings: {}", e);
+                    -3 // Invalid JSON
+                }
+            }
+        })
+    } else {
+        -4 // State not initialized
+    }
 }
 
 /// Free a string returned by other rakuyomi functions
