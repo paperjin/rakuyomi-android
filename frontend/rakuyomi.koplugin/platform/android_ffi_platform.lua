@@ -218,6 +218,13 @@ function AndroidFFIServer:request(request)
             
             if ok and settings and settings.source_lists then
                 addLog(self, "Found " .. tostring(#settings.source_lists) .. " source lists to fetch")
+                addLog(self, "Type of source_lists: " .. tostring(type(settings.source_lists)))
+                
+                -- Check if source_lists is actually a table
+                if type(settings.source_lists) ~= "table" then
+                    addLog(self, "ERROR: source_lists is not a table!")
+                    return { type = 'SUCCESS', status = 200, body = rapidjson.encode({{id="bad_settings", name="Invalid settings.json", description="source_lists is not an array", installed=false}}) }
+                end
                 
                 -- Fetch each source list URL
                 for i, list_url in ipairs(settings.source_lists) do
