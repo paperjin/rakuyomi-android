@@ -1,0 +1,6 @@
+[target.aarch64-linux-android]
+linker = "/Users/albert/Library/Android/android-ndk-r27c/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android26-clang"
+
+[env]
+CC_aarch64_linux_android = "/Users/albert/Library/Android/android-ndk-r27c/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android26-clang"
+AR_aarch64_linux_android = "/Users/albert/Library/Android/android-ndk-r27c/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
