@@ -92,7 +92,7 @@ function AndroidFFIServer:request(request)
         if ready == 1 then
             return { type = 'SUCCESS', status = 200, body = '{"status": "ok"}' }
         else
-            return { type = 'ERROR', status = 503, body = '{"status": "not ready"}' }
+            return { type = 'ERROR', status = 503, message = "Backend not ready", body = '{"status": "not ready"}' }
         end
     end
     
@@ -160,6 +160,56 @@ function AndroidFFIServer:request(request)
         addLog(self, "Fetching library via FFI")
         result_json = self.lib.rakuyomi_get_library()
         
+    elseif path == "/count-notifications" then
+        addLog(self, "Fetching notification count via FFI")
+        -- Stub: return 0 notifications for now
+        return { type = 'SUCCESS', status = 200, body = '0' }
+        
+    elseif path == "/available-sources" then
+        addLog(self, "Fetching available sources via FFI")
+        -- Stub: return empty array
+        return { type = 'SUCCESS', status = 200, body = '[]' }
+        
+    elseif path == "/installed-sources" then
+        addLog(self, "Fetching installed sources via FFI")
+        -- Stub: return empty array
+        return { type = 'SUCCESS', status = 200, body = '[]' }
+        
+    elseif path == "/setting-definitions" then
+        addLog(self, "Fetching setting definitions via FFI")
+        -- Stub: return empty object
+        return { type = 'SUCCESS', status = 200, body = '{}' }
+        
+    elseif path == "/stored-settings" then
+        addLog(self, "Fetching stored settings via FFI")
+        -- Stub: return empty object
+        return { type = 'SUCCESS', status = 200, body = '{}' }
+        
+    elseif path == "/notifications" then
+        addLog(self, "Fetching notifications via FFI")
+        -- Stub: return empty array
+        return { type = 'SUCCESS', status = 200, body = '[]' }
+        
+    elseif path:match("^/chapters") then
+        addLog(self, "Fetching chapters via FFI")
+        -- Stub: return empty chapters list
+        return { type = 'SUCCESS', status = 200, body = '{"chapters": []}' }
+        
+    elseif path:match("^/details") then
+        addLog(self, "Fetching manga details via FFI")
+        -- Stub: return empty object
+        return { type = 'SUCCESS', status = 200, body = '{}' }
+        
+    elseif path == "/mangas" or path:match("^/mangas/") then
+        addLog(self, "Fetching mangas via FFI")
+        -- Stub: return empty array
+        return { type = 'SUCCESS', status = 200, body = '[]' }
+        
+    elseif path:match("^/jobs") then
+        addLog(self, "Job operation via FFI")
+        -- Stub: return empty array for jobs
+        return { type = 'SUCCESS', status = 200, body = '[]' }
+        
     elseif path == "/settings" then
         if method == "GET" then
             addLog(self, "Fetching settings via FFI")
@@ -182,11 +232,11 @@ function AndroidFFIServer:request(request)
     end
     
     if error_msg then
-        return { type = 'ERROR', status = 400, body = '{"error": "' .. error_msg .. '"}' }
+        return { type = 'ERROR', status = 400, message = error_msg, body = '{"error": "' .. error_msg .. '"}' }
     end
     
     if result_json == nil then
-        return { type = 'ERROR', status = 500, body = '{"error": "FFI call returned null"}' }
+        return { type = 'ERROR', status = 500, message = "FFI call returned null", body = '{"error": "FFI call returned null"}' }
     end
     
     -- Convert C string to Lua string

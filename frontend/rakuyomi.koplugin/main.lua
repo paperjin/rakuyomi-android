@@ -24,6 +24,7 @@ local backendLogs = nil
 local function tryInitializeBackend()
     if not backendInitialized then
         local ok, result, logs = pcall(Backend.initialize)
+        logger.warn("Rakuyomi init debug:", ok, tostring(result), tostring(backendInitialized))
         if ok then
             backendInitialized = result
             backendLogs = logs
@@ -70,10 +71,12 @@ function Rakuyomi:init()
 end
 
 function Rakuyomi:onStartLibraryView()
+  logger.warn("Rakuyomi onStartLibraryView - ui.name:", tostring(self.ui and self.ui.name), "backend:", tostring(backendInitialized))
   if self.ui.name == "ReaderUI" then
     MangaReader:initializeFromReaderUI(self.ui)
   else
     if not backendInitialized then
+      logger.warn("Rakuyomi showing error dialog from onStartLibraryView")
       self:showErrorDialog()
 
       return
@@ -88,6 +91,7 @@ function Rakuyomi:addToMainMenu(menu_items)
     text = _("Rakuyomi"),
     sorting_hint = "search",
     callback = function()
+      logger.warn("Rakuyomi menu callback - backendInitialized:", tostring(backendInitialized))
       if not backendInitialized then
         self:showErrorDialog()
 
@@ -100,16 +104,14 @@ function Rakuyomi:addToMainMenu(menu_items)
 end
 
 function Rakuyomi:showErrorDialog()
+  logger.warn("Rakuyomi showErrorDialog called - backendLogs:", tostring(backendLogs), "backendInitialized:", tostring(backendInitialized))
   local errorMsg = tostring(backendLogs or "No error details available.")
-  ErrorDialog:show(
-    _("Oops!") .. _("Rakuyomi encountered an issue while starting up!") .. "\n" ..
-    _("Here are some messages that might help identify the problem:") .. "\n\n" ..
-    errorMsg,
-    function()
-      Backend.cleanup()
-      backendInitialized, backendLogs = Backend.initialize()
-    end
-  )
+  local displayText = "Rakuyomi Error:\n\n" .. errorMsg
+  logger.warn("Rakuyomi showing error dialog with message:", errorMsg)
+  ErrorDialog:show(displayText, function()
+    Backend.cleanup()
+    backendInitialized, backendLogs = Backend.initialize()
+  end)
 end
 
 function Rakuyomi:openLibraryView()
