@@ -357,21 +357,138 @@ function AndroidFFIServer:request(request)
         
     elseif path:match("^/installed%-sources/[^/]+/setting%-definitions$") then
         addLog(self, "Fetching setting definitions via FFI for: " .. path)
-        -- Return empty object for now
-        return { type = 'SUCCESS', status = 200, body = '{}' }
+        -- Example setting definitions for a source
+        local setting_definitions = {
+            {
+                type = 'switch',
+                key = 'use_https',
+                title = 'Use HTTPS',
+                default = true
+            },
+            {
+                type = 'select',
+                key = 'image_quality',
+                title = 'Image Quality',
+                values = {'low', 'medium', 'high'},
+                titles = {'Low', 'Medium', 'High'},
+                default = 'medium'
+            },
+            {
+                type = 'text',
+                key = 'username',
+                title = 'Username',
+                placeholder = 'Enter your username'
+            }
+        }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(setting_definitions) }
         
     elseif path:match("^/installed%-sources/[^/]+/stored%-settings$") then
         addLog(self, "Fetching stored settings via FFI for: " .. path)
-        -- Return empty object for now
-        return { type = 'SUCCESS', status = 200, body = '{}' }
+        -- Get source ID from path
+        local source_id = path:match("/installed%-sources/([^/]+)/stored%-settings$")
+        local INSTALLED_SOURCES_FILE = "/sdcard/koreader/rakuyomi/installed_sources.json"
+        
+        if method == "POST" then
+            -- Save settings
+            addLog(self, "Saving settings for source: " .. source_id)
+            -- Parse request body
+            local ok, new_settings = pcall(function() 
+                if request.body then
+                    return rapidjson.decode(request.body)
+                end
+                return {}
+            end)
+            if not ok then
+                return { type = 'ERROR', status = 400, message = "Invalid JSON in request body", body = '{"error":"Invalid JSON"}' }
+            end
+            -- Load existing sources
+            local file = io.open(INSTALLED_SOURCES_FILE, "r")
+            local sources = {}
+            if file then
+                local content = file:read("*all")
+                file:close()
+                local decode_ok, existing = pcall(function() return rapidjson.decode(content) end)
+                if decode_ok then
+                    sources = existing
+                end
+            end
+            -- Update settings for this source
+            if sources[source_id] then
+                sources[source_id].settings = new_settings
+                -- Save back to file
+                local save_file = io.open(INSTALLED_SOURCES_FILE, "w")
+                if save_file then
+                    save_file:write(rapidjson.encode(sources))
+                    save_file:close()
+                    return { type = 'SUCCESS', status = 200, body = rapidjson.encode(new_settings) }
+                else
+                    return { type = 'ERROR', status = 500, message = "Failed to save settings", body = '{"error":"Failed to save"}' }
+                end
+            else
+                return { type = 'ERROR', status = 404, message = "Source not found", body = '{"error":"Source not found"}' }
+            end
+        else
+            -- GET: Load settings
+            local file = io.open(INSTALLED_SOURCES_FILE, "r")
+            local stored_settings = {}
+            if file then
+                local content = file:read("*all")
+                file:close()
+                local ok, sources = pcall(function() return rapidjson.decode(content) end)
+                if ok and sources and sources[source_id] and sources[source_id].settings then
+                    stored_settings = sources[source_id].settings
+                end
+            end
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(stored_settings) }
+        end
         
     elseif path == "/setting-definitions" then
         addLog(self, "Fetching setting definitions via FFI")
-        return { type = 'SUCCESS', status = 200, body = '{}' }
+        -- Global setting definitions
+        local global_settings = {
+            {
+                type = 'switch',
+                key = 'dark_mode',
+                title = 'Dark Mode',
+                default = false
+            },
+            {
+                type = 'select',
+                key = 'cache_size',
+                title = 'Cache Size',
+                values = {'50mb', '100mb', '500mb', '1gb'},
+                titles = {'50 MB', '100 MB', '500 MB', '1 GB'},
+                default = '100mb'
+            }
+        }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(global_settings) }
         
     elseif path == "/stored-settings" then
         addLog(self, "Fetching stored settings via FFI")
-        return { type = 'SUCCESS', status = 200, body = '{}' }
+        -- Load from settings.json
+        local settings_paths = {
+            Paths.getHomeDirectory() .. "/rakuyomi/settings.json",
+            Paths.getHomeDirectory() .. "/settings.json"
+        }
+        local stored_settings = {}
+        for _, try_path in ipairs(settings_paths) do
+            local file = io.open(try_path, "r")
+            if file then
+                local content = file:read("*all")
+                file:close()
+                local ok, settings = pcall(function() return rapidjson.decode(content) end)
+                if ok and settings then
+                    -- Filter to only stored setting values
+                    for key, value in pairs(settings) do
+                        if key ~= "source_lists" then
+                            stored_settings[key] = value
+                        end
+                    end
+                    break
+                end
+            end
+        end
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(stored_settings) }
         
     elseif path == "/notifications" then
         addLog(self, "Fetching notifications via FFI")
