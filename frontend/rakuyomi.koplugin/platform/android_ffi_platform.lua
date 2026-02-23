@@ -326,7 +326,7 @@ function AndroidFFIServer:request(request)
             local source_info = {
                 id = source_id,
                 name = source_id:gsub("^%l", string.upper),
-                version = "1.0.0",
+                version = 1,  -- Must be number to match available sources format
                 installed = true,
                 source_of_source = ""
             }
