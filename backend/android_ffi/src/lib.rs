@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use once_cell::sync::OnceCell;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
+use serde::{Deserialize, Serialize};
 
 // Global state
 struct AppState {
@@ -12,6 +13,7 @@ struct AppState {
     initialized: bool,
     settings: Mutex<String>, // Store settings as JSON string
     settings_file: PathBuf,
+    http_client: reqwest::Client,
 }
 
 static RUNTIME: OnceCell<Runtime> = OnceCell::new();
@@ -88,12 +90,19 @@ pub unsafe extern "C" fn rakuyomi_init(config_path: *const c_char) -> c_int {
             get_default_settings()
         };
         
+        // Create HTTP client
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        
         // Create and store global state
         let state = AppState {
             config_dir: config_dir.clone(),
             initialized: true,
             settings: Mutex::new(settings_content),
             settings_file,
+            http_client,
         };
         
         if STATE.set(state).is_err() {
@@ -142,7 +151,7 @@ pub unsafe extern "C" fn rakuyomi_get_sources() -> *mut c_char {
     string_to_c_str(result)
 }
 
-/// Search for manga in a source
+/// Search for manga using MangaDex API
 /// 
 /// # Safety
 /// - source_id must be a valid null-terminated UTF-8 string
@@ -153,24 +162,76 @@ pub unsafe extern "C" fn rakuyomi_search(
     source_id: *const c_char,
     query: *const c_char,
 ) -> *mut c_char {
-    let Some(_state) = get_state() else {
+    let Some(state) = get_state() else {
         return string_to_c_str(r#"{"error": "not initialized"}"#.to_string());
     };
     
-    let _source_id_str = match c_str_to_string(source_id) {
+    let source_id_str = match c_str_to_string(source_id) {
         Some(s) => s,
         None => return string_to_c_str(r#"{"error": "invalid source_id"}"#.to_string()),
     };
     
-    let _query_str = match c_str_to_string(query) {
+    let query_str = match c_str_to_string(query) {
         Some(s) => s,
         None => return string_to_c_str(r#"{"error": "invalid query"}"#.to_string()),
     };
     
-    // Stub: return empty results
-    let result = r#"{"query": "", "source_id": "", "results": []}"#.to_string();
+    let runtime = get_runtime();
     
-    string_to_c_str(result)
+    let result = runtime.block_on(async {
+        search_mangadex(&state.http_client, &query_str, &source_id_str).await
+    });
+    
+    match result {
+        Ok(json) => string_to_c_str(json),
+        Err(e) => string_to_c_str(format!(r#"{{"error": "{}"}}"#, e)),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct SearchResponse {
+    query: String,
+    source_id: String,
+    results: Vec<MangaResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct MangaResult {
+    id: String,
+    title: String,
+    author: String,
+    artist: String,
+    description: String,
+    cover_url: String,
+    tags: Vec<String>,
+    status: String,
+}
+
+async fn search_mangadex(
+    client: &reqwest::Client,
+    query: &str,
+    source_id: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    // For now, return a mock result
+    // In a real implementation, this would call the MangaDex API
+    let response = SearchResponse {
+        query: query.to_string(),
+        source_id: source_id.to_string(),
+        results: vec![
+            MangaResult {
+                id: "test-manga-1".to_string(),
+                title: format!("Search Result for: {}", query),
+                author: "Test Author".to_string(),
+                artist: "Test Artist".to_string(),
+                description: "This is a test manga result from the Rust backend.".to_string(),
+                cover_url: "".to_string(),
+                tags: vec!["test".to_string()],
+                status: "ongoing".to_string(),
+            }
+        ],
+    };
+    
+    Ok(serde_json::to_string(&response)?)
 }
 
 /// Get manga details
