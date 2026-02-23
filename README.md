@@ -1,4 +1,4 @@
-# rakuyomi ADK backend test
+# rakuyomi-android
 
 **rakuyomi** is a manga reader plugin for [KOReader](https://github.com/koreader/koreader).
 
