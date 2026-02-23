@@ -104,6 +104,34 @@ local function addLog(self, message)
     logger.info("Server output: " .. message)
 end
 
+-- Simple file-based persistence for installed sources
+-- Path: /sdcard/koreader/rakuyomi/installed_sources.json
+local INSTALLED_SOURCES_FILE = "/sdcard/koreader/rakuyomi/installed_sources.json"
+
+local function loadInstalledSourcesFromFile()
+    local file = io.open(INSTALLED_SOURCES_FILE, "r")
+    if file then
+        local content = file:read("*all")
+        file:close()
+        local ok, sources = pcall(function() return rapidjson.decode(content) end)
+        if ok and type(sources) == "table" then
+            return sources
+        end
+    end
+    return {}
+end
+
+local function saveInstalledSourcesToFile(sources)
+    local file = io.open(INSTALLED_SOURCES_FILE, "w")
+    if file then
+        local json_str = rapidjson.encode(sources)
+        file:write(json_str)
+        file:close()
+        return true
+    end
+    return false
+end
+
 function AndroidFFIServer:request(request)
     -- Map HTTP-like requests to FFI function calls
     local path = request.path
@@ -293,29 +321,44 @@ function AndroidFFIServer:request(request)
         
     elseif path:match("^/available%-sources/[^/]+/install$") then
         addLog(self, "Installing source via FFI: " .. path)
-        logger.warn("Rakuyomi INSTALL CHECK: path=" .. path .. " pattern=" .. tostring(path:match("^/available%-sources/[^/]+/install$") or "nil"))
         local source_id = path:match("/available%-sources/(.+)/install")
         if source_id then
             local source_info = {
                 id = source_id,
                 name = source_id:gsub("^%l", string.upper),
                 version = "1.0.0",
-                installed = true
+                installed = true,
+                source_of_source = ""
             }
-            _G.rakuyomi_installed_sources[source_id] = source_info
-            addLog(self, "Source installed: " .. source_id)
+            -- Load existing sources from file, add new one, save back
+            local installed_sources = loadInstalledSourcesFromFile()
+            installed_sources[source_id] = source_info
+            local saved = saveInstalledSourcesToFile(installed_sources)
+            if saved then
+                addLog(self, "Source installed and saved: " .. source_id)
+            else
+                addLog(self, "Source installed (save failed): " .. source_id)
+            end
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
         else
             return { type = 'ERROR', status = 400, message = "Invalid source ID", body = '{"error": "Invalid source ID"}' }
         end
         
     elseif path == "/installed-sources" then
-        addLog(self, "Fetching installed sources via FFI (global table has " .. tostring(#_G.rakuyomi_installed_sources) .. " sources)")
+        addLog(self, "Fetching installed sources via FFI")
+        -- Load from file
+        local installed_sources = loadInstalledSourcesFromFile()
         local sources_array = {}
-        for _, source in pairs(_G.rakuyomi_installed_sources) do
+        for _, source in pairs(installed_sources) do
             table.insert(sources_array, source)
         end
+        addLog(self, "Found " .. tostring(#sources_array) .. " installed sources")
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(sources_array) }
+        
+    elseif path:match("^/installed%-sources/[^/]+/setting%-definitions$") then
+        addLog(self, "Fetching setting definitions via FFI for: " .. path)
+        -- Return empty object for now
+        return { type = 'SUCCESS', status = 200, body = '{}' }
         
     elseif path == "/setting-definitions" then
         addLog(self, "Fetching setting definitions via FFI")
