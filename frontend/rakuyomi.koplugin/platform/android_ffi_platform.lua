@@ -6,6 +6,23 @@ local ffi = require('ffi')
 local Paths = require('Paths')
 local rapidjson = require('rapidjson')
 
+-- Load HTTP modules for fetching source lists
+local http = nil
+local ltn12 = nil
+local ok, socket_http = pcall(function() return require('socket.http') end)
+if ok and socket_http then
+    http = socket_http
+    local ok2, socket_lt = pcall(function() return require('ltn12') end)
+    if ok2 and socket_lt then
+        ltn12 = socket_lt
+        logger.info("Android FFI: Loaded socket.http and ltn12 for fetching source lists")
+    else
+        logger.warn("Android FFI: Could not load ltn12")
+    end
+else
+    logger.warn("Android FFI: Could not load socket.http")
+end
+
 -- Define the C interface
 ffi.cdef[[
     int rakuyomi_init(const char* config_path);
@@ -48,7 +65,7 @@ ffi.cdef[[
             return lib
         end
     end
-    
+
     return nil, "Could not find librakuyomi.so in any of: " .. table.concat(search_paths, ", ")
 end
 
@@ -64,6 +81,8 @@ function AndroidFFIServer:new(lib)
         maxLogLines = 100,
         -- Store for installed sources (in-memory only for now)
         installedSources = {},
+        -- Store settings
+        settings = nil,
     }
     setmetatable(server, { __index = AndroidFFIServer })
     return server
@@ -150,7 +169,7 @@ function AndroidFFIServer:request(request)
         local source_id = request.query_params and request.query_params.source_id
         local manga_id = request.query_params and request.query_params.manga_id
         local chapter_id = request.query_params and request.query_params.chapter_id
-        
+
         if source_id and manga_id and chapter_id then
             addLog(self, "Fetching pages for chapter " .. chapter_id)
             result_json = self.lib.rakuyomi_get_pages(source_id, manga_id, chapter_id)
@@ -164,52 +183,108 @@ function AndroidFFIServer:request(request)
         
     elseif path == "/count-notifications" then
         addLog(self, "Fetching notification count via FFI")
-        -- Stub: return 0 notifications for now
         return { type = 'SUCCESS', status = 200, body = '0' }
         
     elseif path == "/available-sources" then
         addLog(self, "Fetching available sources via FFI")
-        -- Return mock available sources
-        local mock_sources = {
-            {
-                id = "mangadex",
-                name = "MangaDex",
-                version = "1.4.0",
-                description = "Multi-language manga source",
-                author = "MangaDex",
-                lang = "en",
-                installed = false
-            },
-            {
-                id = "mangakakalot",
-                name = "MangaKakalot",
-                version = "1.4.0",
-                description = "Popular manga source",
-                author = "MangaKakalot",
-                lang = "en",
-                installed = false
-            },
-            {
-                id = "webtoons",
-                name = "Webtoons",
-                version = "1.4.0",
-                description = "Official Webtoon source",
-                author = "Webtoon",
-                lang = "en",
-                installed = false
-            }
+        -- Fetch sources from settings.json source_lists
+        local all_sources = {}
+        
+        -- Read settings.json from multiple paths
+        local settings_paths = {
+            Paths.getHomeDirectory() .. "/rakuyomi/settings.json",
+            Paths.getHomeDirectory() .. "/settings.json",
+            "/sdcard/koreader/rakuyomi/settings.json",
+            "/sdcard/koreader/settings.json",
         }
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_sources) }
+        
+        local settings_file = nil
+        local found_path = nil
+        for _, try_path in ipairs(settings_paths) do
+            settings_file = io.open(try_path, "r")
+            if settings_file then
+                found_path = try_path
+                break
+            end
+        end
+        
+        if settings_file then
+            addLog(self, "Found settings.json at: " .. found_path)
+            local settings_content = settings_file:read("*all")
+            settings_file:close()
+            local ok, settings = pcall(function()
+                return rapidjson.decode(settings_content)
+            end)
+            
+            if ok and settings and settings.source_lists then
+                addLog(self, "Found " .. tostring(#settings.source_lists) .. " source lists to fetch")
+                
+                -- Fetch each source list URL
+                for i, list_url in ipairs(settings.source_lists) do
+                    addLog(self, "Fetching source list " .. tostring(i) .. ": " .. list_url)
+                    
+                    if http and ltn12 then
+                        local response_body = {}
+                        local result, status_code = http.request{
+                            url = list_url,
+                            sink = ltn12.sink.table(response_body),
+                            timeout = 10
+                        }
+                        
+                        if result and status_code == 200 then
+                            local list_content = table.concat(response_body)
+                            addLog(self, "Got " .. tostring(#list_content) .. " bytes")
+                            
+                            local list_ok, source_list = pcall(function()
+                                return rapidjson.decode(list_content)
+                            end)
+                            
+                            if list_ok and type(source_list) == "table" then
+                                addLog(self, "Parsed " .. tostring(#source_list) .. " sources")
+                                
+                                for _, src in ipairs(source_list) do
+                                    if type(src) == "table" and src.id then
+                                        table.insert(all_sources, {
+                                            id = src.id,
+                                            name = src.name or src.id,
+                                            file = src.file,
+                                            icon = src.icon,
+                                            lang = src.lang or "en",
+                                            version = src.version or 1,
+                                            nsfw = src.nsfw or 0,
+                                            installed = false
+                                        })
+                                    end
+                                end
+                            end
+                        else
+                            addLog(self, "Failed to fetch: HTTP " .. tostring(status_code))
+                        end
+                    else
+                        addLog(self, "No HTTP support available")
+                    end
+                end
+            end
+            
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(all_sources) }
+        else
+            addLog(self, "No settings.json found")
+            all_sources = {{
+                id = "no_settings",
+                name = "Settings Not Found",
+                description = "Create /sdcard/koreader/rakuyomi/settings.json with source_lists",
+                installed = false
+            }}
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(all_sources) }
+        end
         
     elseif path:match("^/available-sources/[^/]+/install$") then
         addLog(self, "Installing source via FFI: " .. path)
-        -- Extract source_id from path (e.g., /available-sources/mangadex/install)
         local source_id = path:match("/available-sources/([^/]+)/install")
         if source_id then
-            -- Store the installed source
             local source_info = {
                 id = source_id,
-                name = source_id:gsub("^%l", string.upper), -- Capitalize first letter
+                name = source_id:gsub("^%l", string.upper),
                 version = "1.0.0",
                 installed = true
             }
@@ -222,7 +297,6 @@ function AndroidFFIServer:request(request)
         
     elseif path == "/installed-sources" then
         addLog(self, "Fetching installed sources via FFI")
-        -- Return installed sources as array
         local sources_array = {}
         for _, source in pairs(self.installedSources) do
             table.insert(sources_array, source)
@@ -231,37 +305,30 @@ function AndroidFFIServer:request(request)
         
     elseif path == "/setting-definitions" then
         addLog(self, "Fetching setting definitions via FFI")
-        -- Stub: return empty object
         return { type = 'SUCCESS', status = 200, body = '{}' }
         
     elseif path == "/stored-settings" then
         addLog(self, "Fetching stored settings via FFI")
-        -- Stub: return empty object
         return { type = 'SUCCESS', status = 200, body = '{}' }
         
     elseif path == "/notifications" then
         addLog(self, "Fetching notifications via FFI")
-        -- Stub: return empty array
         return { type = 'SUCCESS', status = 200, body = '[]' }
         
     elseif path:match("^/chapters") then
         addLog(self, "Fetching chapters via FFI")
-        -- Stub: return empty chapters list
         return { type = 'SUCCESS', status = 200, body = '{"chapters": []}' }
         
     elseif path:match("^/details") then
         addLog(self, "Fetching manga details via FFI")
-        -- Stub: return empty object
         return { type = 'SUCCESS', status = 200, body = '{}' }
         
     elseif path == "/mangas" or path:match("^/mangas/") then
         addLog(self, "Fetching mangas via FFI")
-        -- Stub: return empty array
         return { type = 'SUCCESS', status = 200, body = '[]' }
         
     elseif path:match("^/jobs") then
         addLog(self, "Job operation via FFI")
-        -- Stub: return empty array for jobs
         return { type = 'SUCCESS', status = 200, body = '[]' }
         
     elseif path == "/settings" then
@@ -303,7 +370,6 @@ function AndroidFFIServer:request(request)
 end
 
 function AndroidFFIServer:stop()
-    -- Nothing to stop for FFI backend
     logger.info("Android FFI server stopped")
 end
 
@@ -318,7 +384,6 @@ function AndroidFFIPlatform:startServer()
         error("Failed to load rakuyomi library: " .. (err or "unknown error"))
     end
     
-    -- Initialize with config path
     local config_path = Paths.getHomeDirectory()
     local init_result = lib.rakuyomi_init(config_path)
     
@@ -331,7 +396,6 @@ function AndroidFFIPlatform:startServer()
     return AndroidFFIServer:new(lib)
 end
 
--- Helper function to detect if we're on Android
 function AndroidFFIPlatform.isAndroid()
     return os.getenv("ANDROID_ROOT") ~= nil
 end
