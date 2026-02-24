@@ -546,6 +546,8 @@ function AndroidFFIServer:request(request)
         addLog(self, "Removing manga from library: " .. tostring(manga_id))
         -- Remove from library (mock - just return success)
         return { type = 'SUCCESS', status = 200, body = '{}' }
+
+    elseif path:match("^/mangas/[^/]+/[^/]+/chapters$") then
         -- Extract source_id and manga_id from path
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters$")
         addLog(self, "Fetching chapters via FFI: Source=" .. tostring(source_id) .. " Manga=" .. tostring(manga_id))
