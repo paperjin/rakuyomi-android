@@ -212,8 +212,33 @@ function AndroidFFIServer:request(request)
         end
         
     elseif path == "/library" then
-        addLog(self, "Fetching library via FFI")
-        result_json = self.lib.rakuyomi_get_library()
+        addLog(self, "Fetching library via FFI (mock)")
+        -- Return mock library with test mangas for faster testing
+        local mock_library = {
+            {
+                id = "mock-manga-1",
+                title = "Chainsaw Man",
+                author = "Tatsuki Fujimoto",
+                description = "Denji has a simple dream—to live a happy and peaceful life...",
+                cover_url = "",
+                status = "ongoing",
+                source = { id = "en.mangadex", name = "MangaDex" },
+                in_library = true,
+                unread_chapters_count = 5,
+            },
+            {
+                id = "mock-manga-2",
+                title = "Spy x Family",
+                author = "Tatsuya Endo",
+                description = "Master spy Twilight is unparalleled...",
+                cover_url = "",
+                status = "ongoing",
+                source = { id = "en.mangadex", name = "MangaDex" },
+                in_library = true,
+                unread_chapters_count = 3,
+            },
+        }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_library) }
         
     elseif path == "/count-notifications" then
         addLog(self, "Fetching notification count via FFI")
@@ -510,7 +535,17 @@ function AndroidFFIServer:request(request)
         addLog(self, "Fetching notifications via FFI")
         return { type = 'SUCCESS', status = 200, body = '[]' }
         
-    elseif path:match("^/mangas/[^/]+/[^/]+/chapters$") then
+    elseif path:match("^/mangas/[^/]+/[^/]+/add%-to%-library$") then
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/add%-to%-library$")
+        addLog(self, "Adding manga to library: " .. tostring(manga_id))
+        -- Add to library (mock - just return success)
+        return { type = 'SUCCESS', status = 200, body = '{}' }
+        
+    elseif path:match("^/mangas/[^/]+/[^/]+/remove%-from%-library$") then
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/remove%-from%-library$")
+        addLog(self, "Removing manga from library: " .. tostring(manga_id))
+        -- Remove from library (mock - just return success)
+        return { type = 'SUCCESS', status = 200, body = '{}' }
         -- Extract source_id and manga_id from path
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters$")
         addLog(self, "Fetching chapters via FFI: Source=" .. tostring(source_id) .. " Manga=" .. tostring(manga_id))
@@ -608,6 +643,26 @@ function AndroidFFIServer:request(request)
         
         -- Return pages array directly
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_pages) }
+        
+    elseif path:match("^/jobs/download-chapter") then
+        addLog(self, "Download chapter job via FFI")
+        -- Return a job ID for the download
+        local mock_job = {
+            id = "download-" .. tostring(os.time()),
+            status = "completed",
+            progress = 100,
+            message = "Chapter downloaded (mock)",
+        }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_job) }
+        
+    elseif path:match("^/jobs/.*/progress$") then
+        addLog(self, "Job progress via FFI")
+        -- Return completed progress
+        local mock_progress = {
+            status = "completed",
+            progress = 100,
+        }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_progress) }
         
     elseif path:match("^/jobs") then
         addLog(self, "Job operation via FFI")
