@@ -30,23 +30,21 @@ local function http_get(url)
     end
     
     local response_body = {}
-    local ok, status = pcall(function()
-        return http.request {
-            url = url,
-            sink = ltn12.sink.table(response_body),
-            method = "GET"
-        }
-    end)
+    local result, status_code, headers = http.request {
+        url = url,
+        sink = ltn12.sink.table(response_body),
+        method = "GET"
+    }
     
-    if not ok then
-        return nil, "HTTP request failed: " .. tostring(status)
+    if result == nil then
+        return nil, "HTTP request failed: " .. tostring(status_code)
     end
     
-    if status ~= 200 then
-        return nil, "HTTP error: " .. tostring(status)
+    if type(status_code) == "number" and status_code == 200 then
+        return table.concat(response_body), nil
+    else
+        return nil, "HTTP error: " .. tostring(status_code)
     end
-    
-    return table.concat(response_body), nil
 end
 
 -- Search MangaDex API
