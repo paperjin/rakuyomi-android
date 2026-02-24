@@ -79,10 +79,14 @@ function MangaSearchResults:generateItemTableFromSearchResults(results)
       mandatory = (mandatory or "") .. Icons.COD_LIBRARY
     end
 
+    -- Ensure title is never nil
+    local title = manga.title or "Unknown Title"
+    local source_name = manga.source and manga.source.name or "Unknown Source"
+    
     table.insert(item_table, {
       manga = manga,
-      text = manga.title,
-      post_text = manga.source.name,
+      text = title,
+      post_text = source_name,
       mandatory = mandatory,
     })
   end
