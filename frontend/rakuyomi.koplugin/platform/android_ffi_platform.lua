@@ -648,14 +648,13 @@ function AndroidFFIServer:request(request)
         
     elseif path:match("^/jobs/download-chapter") then
         addLog(self, "Download chapter job via FFI")
-        -- Return a job ID for the download
-        local mock_job = {
-            id = "download-" .. tostring(os.time()),
-            status = "completed",
-            progress = 100,
-            message = "Chapter downloaded (mock)",
+        -- Return format: [manga_path, errors]
+        -- manga_path is the path to downloaded chapter, errors is array
+        local response_body = {
+            "/sdcard/koreader/rakuyomi/mock-chapter.cbz",  -- manga_path
+            {}  -- empty errors array
         }
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_job) }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
         
     elseif path:match("^/jobs/.*/progress$") then
         addLog(self, "Job progress via FFI")
