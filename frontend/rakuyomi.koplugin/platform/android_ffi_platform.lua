@@ -573,6 +573,22 @@ function AndroidFFIServer:request(request)
         -- Return chapters as direct array (matching Backend.listCachedChapters response format)
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_chapters) }
         
+    elseif path:match("^/mangas/[^/]+/[^/]+/chapters/[^/]+/update%-last%-read$") then
+        local source_id, manga_id, chapter_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters/([^/]+)/update%-last%-read$")
+        addLog(self, "Update last read via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id) .. " chapter=" .. tostring(chapter_id))
+        return { type = 'SUCCESS', status = 200, body = '{}' }
+
+    elseif path:match("^/mangas/[^/]+/[^/]+/chapters/[^/]+/download$") then
+        -- Handle chapter download
+        local source_id, manga_id, chapter_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters/([^/]+)/download$")
+        addLog(self, "Downloading chapter via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id) .. " chapter=" .. tostring(chapter_id))
+        -- Return format: [manga_path, errors]
+        local response_body = {
+            "/sdcard/koreader/rakuyomi/mock-chapter.cbz",
+            {}
+        }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+        
     elseif path:match("^/chapters") then
         addLog(self, "Fetching chapters via FFI (legacy)")
         return { type = 'SUCCESS', status = 200, body = '{"chapters": []}' }
@@ -646,24 +662,34 @@ function AndroidFFIServer:request(request)
         -- Return pages array directly
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_pages) }
         
-    elseif path:match("^/jobs/download-chapter") then
-        addLog(self, "Download chapter job via FFI")
-        -- Return format: [manga_path, errors]
-        -- manga_path is the path to downloaded chapter, errors is array
-        local response_body = {
-            "/sdcard/koreader/rakuyomi/mock-chapter.cbz",  -- manga_path
-            {}  -- empty errors array
-        }
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+    elseif path:match("^/jobs/download%-chapter") then
+        addLog(self, "Creating download chapter job via FFI")
+        -- Parse request body
+        local body = {}
+        if request.body then
+            local ok, parsed = pcall(function() return rapidjson.decode(request.body) end)
+            if ok then
+                body = parsed
+            end
+        end
+        addLog(self, "Download job for manga: " .. tostring(body.manga_id) .. " chapter: " .. tostring(body.chapter_id))
+        -- Return a job ID
+        local job_id = "job-" .. tostring(os.time())
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_id) }
         
-    elseif path:match("^/jobs/.*/progress$") then
-        addLog(self, "Job progress via FFI")
-        -- Return completed progress
-        local mock_progress = {
-            status = "completed",
-            progress = 100,
+    elseif path:match("^/jobs/[^/]+$") then
+        -- GET /jobs/{id} - returns job details
+        local job_id = path:match("^/jobs/([^/]+)$")
+        addLog(self, "Job details via FFI: job_id=" .. tostring(job_id))
+        -- Return job with type and data (expected by Job.lua poll())
+        local job_details = {
+            type = "COMPLETED",
+            data = {
+                "/sdcard/koreader/rakuyomi/mock-chapter.cbz",
+                {}
+            }
         }
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_progress) }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_details) }
         
     elseif path:match("^/jobs") then
         addLog(self, "Job operation via FFI")
