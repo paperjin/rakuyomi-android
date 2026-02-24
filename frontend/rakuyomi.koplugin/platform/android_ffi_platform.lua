@@ -23,9 +23,102 @@ else
     logger.warn("Android FFI: Could not load socket.http")
 end
 
--- Global storage for installed sources (persists across FFI calls)
--- This is needed because each HTTP request may run in a different Lua thread
-_G.rakuyomi_installed_sources = _G.rakuyomi_installed_sources or {}
+-- Helper function to fetch data via HTTP GET
+local function http_get(url)
+    if not http then
+        return nil, "HTTP module not available"
+    end
+    
+    local response_body = {}
+    local ok, status = pcall(function()
+        return http.request {
+            url = url,
+            sink = ltn12.sink.table(response_body),
+            method = "GET"
+        }
+    end)
+    
+    if not ok then
+        return nil, "HTTP request failed: " .. tostring(status)
+    end
+    
+    if status ~= 200 then
+        return nil, "HTTP error: " .. tostring(status)
+    end
+    
+    return table.concat(response_body), nil
+end
+
+-- Search MangaDex API
+local function searchMangaDex(query)
+    addLog(nil, "Searching MangaDex for: " .. tostring(query))
+    
+    local url = "https://api.mangadex.org/manga?title=" .. query .. "&limit=10&contentRating[]=safe&contentRating[]=suggestive"
+    local body, err = http_get(url)
+    
+    if not body then
+        addLog(nil, "MangaDex search error: " .. tostring(err))
+        return nil, err
+    end
+    
+    local ok, result = pcall(function() return rapidjson.decode(body) end)
+    if not ok then
+        addLog(nil, "JSON parse error: " .. tostring(result))
+        return nil, "JSON parse error"
+    end
+    
+    return result, nil
+end
+
+-- Convert MangaDex format to Rakuyomi format
+local function convertMangaDexToRakuyomi(md_data)
+    local results = {}
+    
+    if not md_data or not md_data.data then
+        return results
+    end
+    
+    for _, manga in ipairs(md_data.data) do
+        local attrs = manga.attributes
+        
+        -- Extract title (prefer English, fall back to first available)
+        local title = "Unknown"
+        if attrs.title then
+            if attrs.title.en then
+                title = attrs.title.en
+            elseif attrs.title["ja-ro"] then
+                title = attrs.title["ja-ro"]
+            else
+                -- Get first available title
+                for _, t in pairs(attrs.title) do
+                    title = t
+                    break
+                end
+            end
+        end
+        
+        -- Extract description (English preferred)
+        local description = ""
+        if attrs.description and attrs.description.en then
+            description = attrs.description.en
+        end
+        
+        -- Map to Rakuyomi format
+        table.insert(results, {
+            id = manga.id,
+            title = title,
+            author = "Unknown",  -- Would need to lookup author relationship
+            description = description,
+            cover_url = "",  -- Would need to fetch cover art
+            status = attrs.status or "unknown",
+            source = { id = "en.mangadex", name = "MangaDex" },
+            in_library = false,
+            unread_chapters_count = 0,
+        })
+    end
+    
+    return results
+end
 
 -- Define the C interface
 ffi.cdef[[
@@ -605,7 +698,24 @@ function AndroidFFIServer:request(request)
             query = request.query_params.q
             addLog(self, "Search query: " .. query)
         end
-        -- Return mock search results in the expected format: [[results], [errors]]
+        -- Call MangaDex API for real search
+        if query and query ~= "" then
+            addLog(self, "Searching MangaDex...")
+            local md_data, err = searchMangaDex(query)
+            
+            if md_data then
+                local results = convertMangaDexToRakuyomi(md_data)
+                addLog(self, "Found " .. tostring(#results) .. " manga from MangaDex")
+                -- Return format: [[results], [errors]]
+                local response_body = {results, {}}
+                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+            else
+                addLog(self, "MangaDex search failed: " .. tostring(err))
+                -- Fall back to mock results on error
+            end
+        end
+        -- Fallback mock search results
+        addLog(self, "Returning mock search results")
         local mock_results = {
             {
                 id = "mock-manga-1",
