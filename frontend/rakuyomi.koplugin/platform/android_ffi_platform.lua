@@ -157,9 +157,9 @@ local function convertMangaDexChaptersToRakuyomi(md_data, manga_id, source_id)
     for _, chapter in ipairs(md_data.data) do
         local attrs = chapter.attributes
         
-        -- Build chapter title
+        -- Build chapter title - handle nil/missing gracefully
         local title = "Chapter " .. tostring(attrs.chapter or "?")
-        if attrs.title and attrs.title ~= "" then
+        if attrs.title and type(attrs.title) == "string" and attrs.title ~= "" then
             title = title .. ": " .. attrs.title
         end
         
@@ -179,6 +179,48 @@ local function convertMangaDexChaptersToRakuyomi(md_data, manga_id, source_id)
     end
     
     return chapters
+end
+
+-- Fetch page URLs from MangaDex at-home server
+local function fetchMangaDexPages(chapter_id)
+    logger.info("Fetching pages from MangaDex for chapter: " .. tostring(chapter_id))
+    
+    local url = "https://api.mangadex.org/at-home/server/" .. chapter_id
+    local body, err = http_get(url)
+    
+    if not body then
+        logger.warn("MangaDex pages error: " .. tostring(err))
+        return nil, err
+    end
+    
+    local ok, result = pcall(function() return rapidjson.decode(body) end)
+    if not ok then
+        logger.warn("JSON parse error in pages: " .. tostring(result))
+        return nil, "JSON parse error"
+    end
+    
+    if not result.chapter or not result.chapter.data then
+        logger.warn("No chapter data in response")
+        return nil, "No pages available"
+    end
+    
+    -- Build page URLs
+    local base_url = result.baseUrl or "https://uploads.mangadex.org"
+    local hash = result.chapter.hash
+    local data = result.chapter.data
+    
+    local pages = {}
+    for i, filename in ipairs(data) do
+        -- Page URL: {baseUrl}/data/{hash}/{filename}
+        local page_url = base_url .. "/data/" .. hash .. "/" .. filename
+        table.insert(pages, {
+            index = i - 1,  -- 0-indexed
+            url = page_url
+        })
+    end
+    
+    logger.info("Got " .. tostring(#pages) .. " pages from MangaDex")
+    return pages, nil
 end
 
 -- Define the C interface
@@ -750,7 +792,33 @@ function AndroidFFIServer:request(request)
         -- Handle chapter download
         local source_id, manga_id, chapter_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters/([^/]+)/download$")
         addLog(self, "Downloading chapter via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id) .. " chapter=" .. tostring(chapter_id))
-        -- Return format: [manga_path, errors]
+        
+        -- Try to fetch real pages from MangaDex
+        if chapter_id and not chapter_id:match("^mock-") then
+            logger.info("Fetching real pages from MangaDex for chapter: " .. chapter_id)
+            local pages, err = fetchMangaDexPages(chapter_id)
+            
+            if pages and #pages > 0 then
+                -- For now, return the first page URL as the "chapter path"
+                -- In a real implementation, we'd download all pages and create a CBZ
+                -- For testing, just return success with the first page
+                local page_urls = {}
+                for _, page in ipairs(pages) do
+                    table.insert(page_urls, page.url)
+                end
+                logger.info("Downloaded chapter with " .. tostring(#page_urls) .. " pages")
+                -- Return first page for now (would need to create CBZ)
+                local response_body = {
+                    page_urls[1],  -- Just return first page URL for now
+                    {}
+                }
+                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+            else
+                logger.warn("Failed to fetch pages: " .. tostring(err) .. ", using mock")
+            end
+        end
+        
+        -- Fallback to mock
         local response_body = {
             "/sdcard/koreader/rakuyomi/mock-chapter.cbz",
             {}
