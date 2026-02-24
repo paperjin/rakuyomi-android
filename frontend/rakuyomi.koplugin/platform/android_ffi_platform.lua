@@ -781,6 +781,50 @@ function AndroidFFIServer:request(request)
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/add%-to%-library$")
         addLog(self, "Adding manga to library: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id))
         
+        -- Fetch manga details from MangaDex to get real title
+        local manga_title = nil
+        local manga_author = "Unknown"
+        
+        if manga_id and not manga_id:match("^mock-") then
+            logger.info("Fetching manga details from MangaDex for: " .. manga_id)
+            local md_url = "https://api.mangadex.org/manga/" .. manga_id
+            local md_body, md_err = http_get(md_url)
+            if md_body then
+                local ok, md_data = pcall(function() return rapidjson.decode(md_body) end)
+                if ok and md_data and md_data.data and md_data.data.attributes then
+                    local attrs = md_data.data.attributes
+                    -- Extract title (prefer English)
+                    if attrs.title then
+                        if attrs.title.en then
+                            manga_title = attrs.title.en
+                        elseif attrs.title["ja-ro"] then
+                            manga_title = attrs.title["ja-ro"]
+                        else
+                            -- Get first available title
+                            for _, t in pairs(attrs.title) do
+                                if t and t ~= "" then
+                                    manga_title = t
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    -- Get author
+                    if attrs.author then
+                        manga_author = attrs.author
+                    end
+                    logger.info("Got manga title from MangaDex: " .. tostring(manga_title))
+                end
+            else
+                logger.warn("Failed to fetch manga details: " .. tostring(md_err))
+            end
+        end
+        
+        -- Fallback to ID-based title if not found
+        if not manga_title or manga_title == "" then
+            manga_title = "Manga " .. manga_id:sub(1, 8)
+        end
+        
         -- Load existing library
         local library = loadLibraryFromFile()
         
@@ -794,22 +838,22 @@ function AndroidFFIServer:request(request)
         end
         
         if not exists then
-            -- Add manga to library with basic info
+            -- Add manga to library with actual info
             local new_manga = {
                 id = manga_id,
-                title = "Manga " .. manga_id:sub(1, 8),
-                author = "Unknown",
+                title = manga_title,
+                author = manga_author,
                 description = "",
                 cover_url = "",
                 status = "ongoing",
-                source = { id = source_id, name = "Installed Source" },
+                source = { id = source_id, name = "MangaDex" },
                 in_library = true,
                 unread_chapters_count = 0,
                 added_at = os.time(),
             }
             table.insert(library, new_manga)
             saveLibraryToFile(library)
-            logger.info("Added manga " .. manga_id .. " to library")
+            logger.info("Added manga '" .. manga_title .. "' to library")
         else
             logger.info("Manga " .. manga_id .. " already in library")
         end
