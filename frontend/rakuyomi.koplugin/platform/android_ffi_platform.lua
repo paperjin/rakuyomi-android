@@ -535,7 +535,9 @@ function AndroidFFIServer:request(request)
                 description = "Denji has a simple dream—to live a happy and peaceful life, spending time with a girl he likes...",
                 cover_url = "",
                 status = "ongoing",
-                source_id = "en.mangadex",
+                source = { id = "en.mangadex", name = "MangaDex" },
+                in_library = false,
+                unread_chapters_count = 0,
             },
             {
                 id = "mock-manga-2", 
@@ -544,7 +546,9 @@ function AndroidFFIServer:request(request)
                 description = "Master spy Twilight is unparalleled when it comes to going undercover on dangerous missions...",
                 cover_url = "",
                 status = "ongoing",
-                source_id = "en.mangadex",
+                source = { id = "en.mangadex", name = "MangaDex" },
+                in_library = false,
+                unread_chapters_count = 0,
             },
             {
                 id = "mock-manga-3",
@@ -553,7 +557,9 @@ function AndroidFFIServer:request(request)
                 description = "Yuji Itadori is an unnaturally physically gifted high school student who lives with his grandfather...",
                 cover_url = "",
                 status = "ongoing",
-                source_id = "en.mangadex",
+                source = { id = "en.mangadex", name = "MangaDex" },
+                in_library = false,
+                unread_chapters_count = 0,
             }
         }
         local response_body = {mock_results, {}} -- [results, errors]
