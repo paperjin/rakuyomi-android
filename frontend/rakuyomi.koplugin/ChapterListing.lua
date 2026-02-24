@@ -390,7 +390,7 @@ function ChapterListing:generateItemTableFromChapters(chapters)
       mandatory = mandatory .. Icons.FA_DOWNLOAD
     end
 
-    local post_text = nil
+    local post_text = ""
     if chapter.locked then
       post_text = _("Locked")
     end
