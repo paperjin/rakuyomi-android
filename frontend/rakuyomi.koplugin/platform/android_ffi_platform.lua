@@ -510,8 +510,34 @@ function AndroidFFIServer:request(request)
         addLog(self, "Fetching notifications via FFI")
         return { type = 'SUCCESS', status = 200, body = '[]' }
         
+    elseif path:match("^/mangas/[^/]+/[^/]+/chapters$") then
+        -- Extract source_id and manga_id from path
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters$")
+        addLog(self, "Fetching chapters via FFI: Source=" .. tostring(source_id) .. " Manga=" .. tostring(manga_id))
+        
+        -- Return mock chapters with ALL possible fields
+        local mock_chapters = {}
+        for i = 1, 5 do
+            table.insert(mock_chapters, {
+                id = manga_id .. "-chapter-" .. tostring(i),
+                manga_id = manga_id,
+                source_id = source_id,
+                title = "Chapter " .. tostring(i) .. ": Mock Title",
+                chapter_num = i,
+                volume_num = 1,
+                lang = "en",
+                scanlator = "Mock Scans",
+                read = false,
+                downloaded = false,
+                locked = false,
+            })
+        end
+        
+        -- Return chapters as direct array (matching Backend.listCachedChapters response format)
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_chapters) }
+        
     elseif path:match("^/chapters") then
-        addLog(self, "Fetching chapters via FFI")
+        addLog(self, "Fetching chapters via FFI (legacy)")
         return { type = 'SUCCESS', status = 200, body = '{"chapters": []}' }
         
     elseif path:match("^/details") then
@@ -564,6 +590,24 @@ function AndroidFFIServer:request(request)
         }
         local response_body = {mock_results, {}} -- [results, errors]
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+        
+    elseif path:match("^/chapters/[^/]+/pages$") then
+        -- Extract chapter_id from path
+        local chapter_id = path:match("^/chapters/([^/]+)/pages$")
+        addLog(self, "Fetching pages via FFI for chapter: " .. tostring(chapter_id))
+        
+        -- Return mock pages (array of image URLs)
+        local mock_pages = {}
+        for i = 1, 5 do
+            table.insert(mock_pages, {
+                index = i,
+                url = "https://example.com/mock-page-" .. tostring(i) .. ".jpg",
+                -- In a real implementation, these would be base64 or local file paths
+            })
+        end
+        
+        -- Return pages array directly
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_pages) }
         
     elseif path:match("^/jobs") then
         addLog(self, "Job operation via FFI")
