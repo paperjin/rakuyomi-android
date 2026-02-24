@@ -382,7 +382,7 @@ function ChapterListing:generateItemTableFromChapters(chapters)
       mandatory = mandatory .. Icons.FA_BOOK
     end
 
-    if chapter.last_read then
+    if chapter.last_read and type(chapter.last_read) == "number" then
       mandatory = (calcLastReadText(chapter.last_read) .. " ") .. mandatory
     end
 
@@ -402,7 +402,7 @@ function ChapterListing:generateItemTableFromChapters(chapters)
       chapter = chapter,
       text = text,
       post_text = post_text,
-      dim = chapter.locked,
+      dim = chapter.locked or false,
       mandatory = chapter.locked and Icons.FA_LOCKED or mandatory,
     })
   end
