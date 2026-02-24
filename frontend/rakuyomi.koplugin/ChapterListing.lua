@@ -193,7 +193,7 @@ function ChapterListing:patchTitleBar(count_lang)
 
     VerticalGroup:new {
       Button:new {
-        text = Icons.LANG .. " " .. count_lang,
+        text = Icons.LANG .. " " .. tostring(count_lang or 0),
         face = SMALL_FONT_FACE,
         bordersize = 0,
         enabled = true,
