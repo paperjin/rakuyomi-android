@@ -244,4 +244,34 @@ function SourceSettings:updateStoredSetting(key, new_value)
   self.stored_settings = response.body
 end
 
+--- Fetches settings and shows the settings dialog.
+--- @param source_id string
+--- @param onReturnCallback function
+function SourceSettings:fetchAndShow(source_id, onReturnCallback)
+  -- Fetch setting definitions
+  local definitions_response = Backend.getSourceSettingDefinitions(source_id)
+  if definitions_response.type == 'ERROR' then
+    ErrorDialog:show(definitions_response.message)
+    return
+  end
+  
+  -- Fetch stored settings
+  local settings_response = Backend.getSourceStoredSettings(source_id)
+  if settings_response.type == 'ERROR' then
+    ErrorDialog:show(settings_response.message)
+    return
+  end
+  
+  local ui = SourceSettings:new {
+    source_id = source_id,
+    setting_definitions = definitions_response.body,
+    stored_settings = settings_response.body or {},
+    on_return_callback = onReturnCallback,
+    width = Screen:getWidth(),
+    height = Screen:getHeight(),
+  }
+  
+  UIManager:show(ui)
+end
+
 return SourceSettings

@@ -996,9 +996,100 @@ function AndroidFFIServer:request(request)
         addLog(self, "Fetching chapters via FFI (legacy)")
         return { type = 'SUCCESS', status = 200, body = '{"chapters": []}' }
         
+    elseif path:match("^/mangas/([^/]+)/([^/]+)/details$") then
+        -- GET /mangas/{source}/{id}/details - Returns cached manga details
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/details$")
+        addLog(self, "Fetching manga details via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id))
+        
+        -- Return format: [Manga, per_read_count]
+        -- Try to fetch real details from MangaDex if not a mock ID
+        local manga_details = nil
+        
+        if manga_id and not manga_id:match("^mock-") then
+            -- Try to fetch from MangaDex
+            logger.info("Fetching manga details from MangaDex for: " .. manga_id)
+            local md_url = "https://api.mangadex.org/manga/" .. manga_id
+            local md_body, md_err = http_get(md_url)
+            
+            if md_body then
+                local ok, md_data = pcall(function() return rapidjson.decode(md_body) end)
+                if ok and md_data and md_data.data and md_data.data.attributes then
+                    local attrs = md_data.data.attributes
+                    local title = "Unknown"
+                    if attrs.title then
+                        if attrs.title.en then
+                            title = attrs.title.en
+                        elseif attrs.title["ja-ro"] then
+                            title = attrs.title["ja-ro"]
+                        else
+                            for _, t in pairs(attrs.title) do
+                                if t and t ~= "" then
+                                    title = t
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    
+                    manga_details = {
+                        id = manga_id,
+                        title = title,
+                        author = attrs.author or "Unknown",
+                        description = attrs.description and attrs.description.en or "",
+                        cover_url = "",
+                        status = attrs.status or "ongoing",
+                        source = { id = source_id, name = "MangaDex" },
+                        in_library = false,
+                        unread_chapters_count = 0,
+                    }
+                    logger.info("Got manga details: " .. title)
+                end
+            end
+        end
+        
+        -- Fallback to mock details
+        if not manga_details then
+            manga_details = {
+                id = manga_id,
+                title = "Manga " .. manga_id:sub(1, 8),
+                author = "Unknown",
+                description = "No description available",
+                cover_url = "",
+                status = "ongoing",
+                source = { id = source_id, name = "MangaDex" },
+                in_library = false,
+                unread_chapters_count = 0,
+            }
+        end
+        
+        -- Return [Manga, per_read_count]
+        local response_body = {manga_details, 0}
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+        
+    elseif path:match("^/mangas/[^/]+/[^/]+/refresh%-details$") then
+        -- POST /mangas/{source}/{id}/refresh-details - Refreshes manga details
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/refresh%-details$")
+        addLog(self, "Refreshing manga details via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id))
+        -- Same as details for now - just return the current details
+        -- In a full implementation, this would trigger a refresh from the source
+        local response_body = {{ id = manga_id, title = "Manga " .. manga_id:sub(1, 8), author = "Unknown", description = "", cover_url = "", status = "ongoing", source = { id = source_id, name = "MangaDex" }, in_library = false, unread_chapters_count = 0 }, 0}
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+        
     elseif path:match("^/details") then
-        addLog(self, "Fetching manga details via FFI")
-        return { type = 'SUCCESS', status = 200, body = '{}' }
+        -- Legacy fallback
+        addLog(self, "Fetching manga details via FFI (legacy)")
+        local mock_details = {{
+            id = "mock",
+            title = "Mock Manga",
+            author = "Unknown",
+            description = "No description",
+            cover_url = "",
+            status = "ongoing",
+            source = { id = "en.mangadex", name = "MangaDex" },
+            in_library = false,
+            unread_chapters_count = 0,
+        }, 0}
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_details) }
         
     elseif path == "/mangas" or path:match("^/mangas%?") or path:match("^/mangas/") then
         addLog(self, "Fetching mangas via FFI: " .. path)
