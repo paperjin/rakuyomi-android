@@ -328,6 +328,43 @@ local function saveInstalledSourcesToFile(sources)
     return false
 end
 
+-- Library persistence functions
+local LIBRARY_FILE = "/sdcard/koreader/rakuyomi/library.json"
+
+local function loadLibraryFromFile()
+    local file = io.open(LIBRARY_FILE, "r")
+    if file then
+        local content = file:read("*all")
+        file:close()
+        local ok, data = pcall(function() return rapidjson.decode(content) end)
+        if ok and type(data) == "table" then
+            logger.info("Loaded " .. tostring(#data) .. " items from library file")
+            return data
+        end
+    end
+    return {}
+end
+
+local function saveLibraryToFile(library)
+    local file = io.open(LIBRARY_FILE, "w")
+    if file then
+        local ok, encoded = pcall(function() return rapidjson.encode(library) end)
+        if ok then
+            file:write(encoded)
+            file:close()
+            logger.info("Saved " .. tostring(#library) .. " items to library file")
+            return true
+        else
+            logger.warn("Failed to encode library: " .. tostring(encoded))
+        end
+    else
+        logger.warn("Failed to open library file for writing")
+    end
+    return false
+end
+
+
+
 function AndroidFFIServer:request(request)
     -- Map HTTP-like requests to FFI function calls
     local path = request.path
@@ -408,8 +445,17 @@ function AndroidFFIServer:request(request)
         end
         
     elseif path == "/library" then
-        addLog(self, "Fetching library via FFI (mock)")
-        -- Return mock library with test mangas for faster testing
+        addLog(self, "Fetching library via FFI")
+        -- Load library from file
+        local library = loadLibraryFromFile()
+        
+        if library and #library > 0 then
+            logger.info("Returning " .. tostring(#library) .. " items from library")
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(library) }
+        end
+        
+        -- Fallback to mock library if empty
+        logger.info("Library empty, returning defaults")
         local mock_library = {
             {
                 id = "mock-manga-1",
@@ -733,14 +779,67 @@ function AndroidFFIServer:request(request)
         
     elseif path:match("^/mangas/[^/]+/[^/]+/add%-to%-library$") then
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/add%-to%-library$")
-        addLog(self, "Adding manga to library: " .. tostring(manga_id))
-        -- Add to library (mock - just return success)
+        addLog(self, "Adding manga to library: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id))
+        
+        -- Load existing library
+        local library = loadLibraryFromFile()
+        
+        -- Check if already in library
+        local exists = false
+        for _, item in ipairs(library) do
+            if item.id == manga_id and item.source.id == source_id then
+                exists = true
+                break
+            end
+        end
+        
+        if not exists then
+            -- Add manga to library with basic info
+            local new_manga = {
+                id = manga_id,
+                title = "Manga " .. manga_id:sub(1, 8),
+                author = "Unknown",
+                description = "",
+                cover_url = "",
+                status = "ongoing",
+                source = { id = source_id, name = "Installed Source" },
+                in_library = true,
+                unread_chapters_count = 0,
+                added_at = os.time(),
+            }
+            table.insert(library, new_manga)
+            saveLibraryToFile(library)
+            logger.info("Added manga " .. manga_id .. " to library")
+        else
+            logger.info("Manga " .. manga_id .. " already in library")
+        end
+        
         return { type = 'SUCCESS', status = 200, body = '{}' }
         
     elseif path:match("^/mangas/[^/]+/[^/]+/remove%-from%-library$") then
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/remove%-from%-library$")
-        addLog(self, "Removing manga from library: " .. tostring(manga_id))
-        -- Remove from library (mock - just return success)
+        addLog(self, "Removing manga from library: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id))
+        
+        -- Load existing library
+        local library = loadLibraryFromFile()
+        
+        -- Find and remove manga
+        local found = false
+        for i, item in ipairs(library) do
+            if item.id == manga_id and item.source.id == source_id then
+                table.remove(library, i)
+                found = true
+                break
+            end
+        end
+        
+        if found then
+            saveLibraryToFile(library)
+            logger.info("Removed manga " .. manga_id .. " from library")
+        else
+            logger.warn("Manga " .. manga_id .. " not found in library")
+        end
+        
         return { type = 'SUCCESS', status = 200, body = '{}' }
 
     elseif path:match("^/mangas/[^/]+/[^/]+/chapters$") then
