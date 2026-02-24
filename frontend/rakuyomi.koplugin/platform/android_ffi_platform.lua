@@ -950,6 +950,30 @@ function AndroidFFIServer:request(request)
         -- Return chapters as direct array (matching Backend.listCachedChapters response format)
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_chapters) }
         
+    elseif path:match("^/mangas/[^/]+/[^/]+/preferred%-scanlator$") then
+        -- GET/POST /mangas/{source}/{id}/preferred-scanlator
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/preferred%-scanlator$")
+        addLog(self, "Preferred scanlator via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id) .. " method=" .. tostring(method))
+        
+        if method == "POST" then
+            -- Save preferred scanlator
+            -- Parse request body
+            local ok, body_data = pcall(function() 
+                if request.body then
+                    return rapidjson.decode(request.body)
+                end
+                return {}
+            end)
+            if ok and body_data and body_data.preferred_scanlator then
+                logger.info("Saving preferred scanlator: " .. tostring(body_data.preferred_scanlator))
+                -- For now just return success (would need storage)
+            end
+            return { type = 'SUCCESS', status = 200, body = '""' }
+        else
+            -- GET: Return empty string (no preference)
+            return { type = 'SUCCESS', status = 200, body = '""' }
+        end
+        
     elseif path:match("^/mangas/[^/]+/[^/]+/chapters/[^/]+/update%-last%-read$") then
         local source_id, manga_id, chapter_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters/([^/]+)/update%-last%-read$")
         addLog(self, "Update last read via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id) .. " chapter=" .. tostring(chapter_id))
