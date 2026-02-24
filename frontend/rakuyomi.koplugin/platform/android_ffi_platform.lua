@@ -49,21 +49,27 @@ end
 
 -- Search MangaDex API
 local function searchMangaDex(query)
-    addLog(nil, "Searching MangaDex for: " .. tostring(query))
+    logger.info("Searching MangaDex for: " .. tostring(query))
     
     local url = "https://api.mangadex.org/manga?title=" .. query .. "&limit=10&contentRating[]=safe&contentRating[]=suggestive"
+    logger.info("MangaDex URL: " .. url)
+    
+    logger.info("About to call http_get...")
     local body, err = http_get(url)
+    logger.info("http_get returned, body is nil: " .. tostring(body == nil))
     
     if not body then
-        addLog(nil, "MangaDex search error: " .. tostring(err))
+        logger.warn("MangaDex search error: " .. tostring(err))
         return nil, err
     end
+    logger.info("Got response body, length: " .. tostring(#body))
     
     local ok, result = pcall(function() return rapidjson.decode(body) end)
     if not ok then
-        addLog(nil, "JSON parse error: " .. tostring(result))
+        logger.warn("JSON parse error: " .. tostring(result))
         return nil, "JSON parse error"
     end
+    logger.info("Successfully parsed JSON, result count: " .. tostring(#(result.data or {})))
     
     return result, nil
 end
@@ -690,11 +696,12 @@ function AndroidFFIServer:request(request)
         
     elseif path == "/mangas" or path:match("^/mangas%?") or path:match("^/mangas/") then
         addLog(self, "Fetching mangas via FFI: " .. path)
-        -- Extract query params if present
+        -- Extract query from path (e.g., /mangas?q=chainsaw&cancel_id=1)
         local query = ""
-        if request.query_params and request.query_params.q then
-            query = request.query_params.q
-            addLog(self, "Search query: " .. query)
+        local q_match = path:match("q=([^&]+)")
+        if q_match then
+            query = q_match
+            addLog(self, "Search query from path: " .. query)
         end
         -- Call MangaDex API for real search
         if query and query ~= "" then
