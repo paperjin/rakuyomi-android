@@ -470,7 +470,7 @@ function ChapterListing:fetchAndShow(manga, onReturnCallback, accept_cached_resu
     chapter_sorting_mode = settings.chapter_sorting_mode,
     on_return_callback = onReturnCallback,
     covers_fullscreen = true, -- hint for UIManager:_repaint()
-    page = self.page,
+    page = 1,  -- Start on first page (was self.page which is nil)
     preload_count = settings.preload_chapters,
   }
   ui.on_return_callback = onReturnCallback
