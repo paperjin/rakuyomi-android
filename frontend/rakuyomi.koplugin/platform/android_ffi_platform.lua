@@ -622,6 +622,30 @@ function AndroidFFIServer:request(request)
         addLog(self, "Found " .. tostring(#sources_array) .. " installed sources")
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(sources_array) }
         
+    elseif path:match("^/installed%-sources/([^/]+)$") and method == "DELETE" then
+        -- DELETE /installed-sources/{id} - Uninstall a source
+        local source_id = path:match("^/installed%-sources/([^/]+)$")
+        addLog(self, "Uninstalling source via FFI: " .. tostring(source_id))
+        
+        -- Load installed sources
+        local installed_sources = loadInstalledSourcesFromFile()
+        
+        if installed_sources[source_id] then
+            -- Remove the source
+            installed_sources[source_id] = nil
+            local saved = saveInstalledSourcesToFile(installed_sources)
+            if saved then
+                logger.info("Uninstalled source: " .. source_id)
+                return { type = 'SUCCESS', status = 200, body = '{}' }
+            else
+                logger.warn("Failed to save after uninstall: " .. source_id)
+                return { type = 'ERROR', status = 500, message = "Failed to save", body = '{"error": "Save failed"}' }
+            end
+        else
+            logger.warn("Source not found for uninstall: " .. source_id)
+            return { type = 'ERROR', status = 404, message = "Source not found", body = '{"error": "Source not found"}' }
+        end
+        
     elseif path:match("^/installed%-sources/[^/]+/setting%-definitions$") then
         addLog(self, "Fetching setting definitions via FFI for: " .. path)
         -- Example setting definitions for a source
