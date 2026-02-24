@@ -178,7 +178,12 @@ function SourceSettings:init()
       -- leak here
       label = def.title or def.placeholder,
       value_definition = mapSettingDefinitionToValueDefinition(def),
-      value = self.stored_settings[def.key] or def.default,
+      -- FIX: Handle false values correctly (false is falsy in Lua, so 'or' won't work)
+      value = (function()
+        local v = self.stored_settings[def.key]
+        if v == nil then return def.default end
+        return v
+      end)(),
       source_id = self.source_id,
       on_value_changed_callback = function(new_value)
         self:updateStoredSetting(def.key, new_value)
@@ -198,93 +203,45 @@ function SourceSettings:init()
     fullscreen = true,
     width = self.dimen.w,
     with_bottom_line = true,
-    bottom_line_color = Blitbuffer.COLOR_DARK_GRAY,
-    bottom_line_h_padding = padding,
-    left_icon = "chevron.left",
-    left_icon_tap_callback = function()
+    on_back_callback = function()
       self:onReturn()
     end,
-    close_callback = function()
-      self:onClose()
-    end,
   }
 
-  local content = OverlapGroup:new {
-    allow_mirroring = false,
-    dimen = self.inner_dimen:copy(),
-    VerticalGroup:new {
-      align = "left",
-      self.title_bar,
-      HorizontalGroup:new {
-        HorizontalSpan:new { width = padding },
-        vertical_group
-      }
-    }
-  }
-
-  self[1] = FrameContainer:new {
-    show_parent = self,
-    width = self.dimen.w,
-    height = self.dimen.h,
+  local frame_container = FrameContainer:new {
+    background = Blitbuffer.COLOR_WHITE,
+    bordersupersolid = true,
     padding = 0,
     margin = 0,
-    bordersize = border_size,
-    focusable = true,
-    background = Blitbuffer.COLOR_WHITE,
-    content
+    self.title_bar,
+    vertical_group,
   }
 
-  UIManager:setDirty(self, "ui")
+  self[1] = frame_container
+
+  self:focusElement(0, 0, FocusManager.FOCUS_DEFAULT)
 end
 
---- @private
-function SourceSettings:onClose()
+function SourceSettings:onReturn()
   UIManager:close(self)
-  if self.on_return_callback then
+
+  if self.on_return_callback ~= nil then
     self.on_return_callback()
   end
 end
 
---- @private
-function SourceSettings:onReturn()
-  self:onClose()
-end
-
---- @private
 function SourceSettings:updateStoredSetting(key, new_value)
   self.stored_settings[key] = new_value
 
-  local response = Backend.setSourceStoredSettings(self.source_id, self.stored_settings)
-  if response.type == 'ERROR' then
-    ErrorDialog:show(response.message)
-  end
-end
+  local response, err = Backend.setStoredSettings(self.source_id, self.stored_settings)
 
---- @private
-function SourceSettings:fetchAndShow(source_id, on_return_callback)
-  local setting_definitions_response = Backend.getSourceSettingDefinitions(source_id)
-  if setting_definitions_response.type == 'ERROR' then
-    ErrorDialog:show(setting_definitions_response.message)
+  if err ~= nil then
+    ErrorDialog:show(err)
     return
   end
 
-  local stored_settings_response = Backend.getSourceStoredSettings(source_id)
-  if stored_settings_response.type == 'ERROR' then
-    ErrorDialog:show(stored_settings_response.message)
-    return
-  end
-
-  local setting_definitions = setting_definitions_response.body
-  local stored_settings = stored_settings_response.body
-
-  local ui = SourceSettings:new {
-    source_id = source_id,
-    setting_definitions = setting_definitions,
-    stored_settings = stored_settings,
-    on_return_callback = on_return_callback,
-  }
-  ui.on_return_callback = on_return_callback
-  UIManager:show(ui)
+  -- Update the local stored settings after a successful write
+  self.stored_settings = response.body
 end
 
 return SourceSettings
