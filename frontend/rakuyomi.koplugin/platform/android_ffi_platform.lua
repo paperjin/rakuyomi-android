@@ -387,6 +387,7 @@ function AndroidFFIServer:request(request)
         -- Get source ID from path
         local source_id = path:match("/installed%-sources/([^/]+)/stored%-settings$")
         local INSTALLED_SOURCES_FILE = "/sdcard/koreader/rakuyomi/installed_sources.json"
+        addLog(self, "Source ID: " .. tostring(source_id) .. " Method: " .. tostring(method))
         
         if method == "POST" then
             -- Save settings
@@ -398,6 +399,7 @@ function AndroidFFIServer:request(request)
                 end
                 return {}
             end)
+            addLog(self, "Parse body result: " .. tostring(ok) .. " body: " .. tostring(request.body))
             if not ok then
                 return { type = 'ERROR', status = 400, message = "Invalid JSON in request body", body = '{"error":"Invalid JSON"}' }
             end
@@ -415,11 +417,13 @@ function AndroidFFIServer:request(request)
             -- Update settings for this source
             if sources[source_id] then
                 sources[source_id].settings = new_settings
+                addLog(self, "Updated settings for " .. source_id .. ": " .. rapidjson.encode(new_settings))
                 -- Save back to file
                 local save_file = io.open(INSTALLED_SOURCES_FILE, "w")
                 if save_file then
                     save_file:write(rapidjson.encode(sources))
                     save_file:close()
+                    addLog(self, "Settings saved to file")
                     return { type = 'SUCCESS', status = 200, body = rapidjson.encode(new_settings) }
                 else
                     return { type = 'ERROR', status = 500, message = "Failed to save settings", body = '{"error":"Failed to save"}' }
@@ -429,15 +433,27 @@ function AndroidFFIServer:request(request)
             end
         else
             -- GET: Load settings
+            addLog(self, "Loading settings for source: " .. source_id)
             local file = io.open(INSTALLED_SOURCES_FILE, "r")
             local stored_settings = {}
             if file then
                 local content = file:read("*all")
                 file:close()
+                addLog(self, "File content length: " .. tostring(#content))
                 local ok, sources = pcall(function() return rapidjson.decode(content) end)
-                if ok and sources and sources[source_id] and sources[source_id].settings then
-                    stored_settings = sources[source_id].settings
+                if ok and sources then
+                    addLog(self, "Decoded sources, has " .. source_id .. ": " .. tostring(sources[source_id] ~= nil))
+                    if sources[source_id] and sources[source_id].settings then
+                        stored_settings = sources[source_id].settings
+                        addLog(self, "Found stored settings: " .. rapidjson.encode(stored_settings))
+                    else
+                        addLog(self, "No settings found for " .. source_id)
+                    end
+                else
+                    addLog(self, "Failed to decode sources")
                 end
+            else
+                addLog(self, "File not found: " .. INSTALLED_SOURCES_FILE)
             end
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode(stored_settings) }
         end
