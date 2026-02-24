@@ -124,6 +124,63 @@ local function convertMangaDexToRakuyomi(md_data)
     return results
 end
 
+-- Fetch chapters from MangaDex API
+local function fetchMangaDexChapters(manga_id)
+    logger.info("Fetching chapters from MangaDex for manga: " .. tostring(manga_id))
+    
+    local url = "https://api.mangadex.org/manga/" .. manga_id .. "/feed?limit=100&translatedLanguage[]=en&order[chapter]=asc"
+    local body, err = http_get(url)
+    
+    if not body then
+        logger.warn("MangaDex chapters error: " .. tostring(err))
+        return nil, err
+    end
+    
+    local ok, result = pcall(function() return rapidjson.decode(body) end)
+    if not ok then
+        logger.warn("JSON parse error in chapters: " .. tostring(result))
+        return nil, "JSON parse error"
+    end
+    
+    logger.info("Got " .. tostring(#(result.data or {})) .. " chapters from MangaDex")
+    return result, nil
+end
+
+-- Convert MangaDex chapters to Rakuyomi format
+local function convertMangaDexChaptersToRakuyomi(md_data, manga_id, source_id)
+    local chapters = {}
+    
+    if not md_data or not md_data.data then
+        return chapters
+    end
+    
+    for _, chapter in ipairs(md_data.data) do
+        local attrs = chapter.attributes
+        
+        -- Build chapter title
+        local title = "Chapter " .. tostring(attrs.chapter or "?")
+        if attrs.title and attrs.title ~= "" then
+            title = title .. ": " .. attrs.title
+        end
+        
+        table.insert(chapters, {
+            id = chapter.id,
+            manga_id = manga_id,
+            source_id = source_id,
+            title = title,
+            chapter_num = tonumber(attrs.chapter) or 0,
+            volume_num = tonumber(attrs.volume) or 1,
+            lang = attrs.translatedLanguage or "en",
+            scanlator = "MangaDex",
+            read = false,
+            downloaded = false,
+            locked = false,
+        })
+    end
+    
+    return chapters
+end
+
 -- Define the C interface
 ffi.cdef[[
     int rakuyomi_init(const char* config_path);
@@ -649,7 +706,21 @@ function AndroidFFIServer:request(request)
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters$")
         addLog(self, "Fetching chapters via FFI: Source=" .. tostring(source_id) .. " Manga=" .. tostring(manga_id))
         
-        -- Return mock chapters with ALL possible fields
+        -- Try to fetch real chapters from MangaDex if this is a real manga ID
+        if manga_id and not manga_id:match("^mock-") then
+            logger.info("Fetching real chapters from MangaDex for: " .. manga_id)
+            local md_data, err = fetchMangaDexChapters(manga_id)
+            
+            if md_data then
+                local chapters = convertMangaDexChaptersToRakuyomi(md_data, manga_id, source_id)
+                logger.info("Returning " .. tostring(#chapters) .. " real chapters from MangaDex")
+                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(chapters) }
+            else
+                logger.warn("Failed to fetch chapters: " .. tostring(err) .. ", falling back to mock")
+            end
+        end
+        
+        -- Return mock chapters as fallback
         local mock_chapters = {}
         for i = 1, 5 do
             table.insert(mock_chapters, {
