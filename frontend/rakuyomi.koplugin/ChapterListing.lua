@@ -362,18 +362,18 @@ function ChapterListing:generateItemTableFromChapters(chapters)
     if chapter.volume_num ~= nil then
       -- FIXME we assume there's a chapter number if there's a volume number
       -- might not be true but who knows
-      text = text .. _("Volume") .. " " .. chapter.volume_num .. ", "
+      text = text .. _("Volume") .. " " .. (chapter.volume_num or "?") .. ", "
     end
 
     if chapter.chapter_num ~= nil then
-      text = text .. _("Chapter") .. " " .. chapter.chapter_num .. " - "
+      text = text .. _("Chapter") .. " " .. (chapter.chapter_num or "?") .. " - "
     end
 
-    text = text .. chapter.title
+    text = text .. (chapter.title or "Untitled")
 
     -- Only show scanlator if not filtering by scanlator
     if chapter.scanlator ~= nil and not self.selected_scanlator then
-      text = text .. " (" .. chapter.scanlator .. ")"
+      text = text .. " (" .. (chapter.scanlator or "Unknown") .. ")"
     end
 
     -- The text that shows to the right of the menu item
