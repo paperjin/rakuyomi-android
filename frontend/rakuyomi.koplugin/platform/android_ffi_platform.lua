@@ -1243,44 +1243,9 @@ function AndroidFFIServer:request(request)
                 -- Fall back to mock results on error
             end
         end
-        -- Fallback mock search results
-        addLog(self, "Returning mock search results")
-        local mock_results = {
-            {
-                id = "mock-manga-1",
-                title = "Chainsaw Man",
-                author = "Tatsuki Fujimoto",
-                description = "Denji has a simple dream—to live a happy and peaceful life, spending time with a girl he likes...",
-                cover_url = "",
-                status = "ongoing",
-                source = { id = "en.mangadex", name = "MangaDex" },
-                in_library = false,
-                unread_chapters_count = 0,
-            },
-            {
-                id = "mock-manga-2", 
-                title = "Spy x Family",
-                author = "Tatsuya Endo",
-                description = "Master spy Twilight is unparalleled when it comes to going undercover on dangerous missions...",
-                cover_url = "",
-                status = "ongoing",
-                source = { id = "en.mangadex", name = "MangaDex" },
-                in_library = false,
-                unread_chapters_count = 0,
-            },
-            {
-                id = "mock-manga-3",
-                title = "Jujutsu Kaisen", 
-                author = "Gege Akutami",
-                description = "Yuji Itadori is an unnaturally physically gifted high school student who lives with his grandfather...",
-                cover_url = "",
-                status = "ongoing",
-                source = { id = "en.mangadex", name = "MangaDex" },
-                in_library = false,
-                unread_chapters_count = 0,
-            }
-        }
-        local response_body = {mock_results, {}} -- [results, errors]
+        -- Fallback: return empty results if MangaDex fails
+        addLog(self, "MangaDex search failed, returning empty results")
+        local response_body = {{}, {}}
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
         
     elseif path:match("^/chapters/[^/]+/pages$") then
