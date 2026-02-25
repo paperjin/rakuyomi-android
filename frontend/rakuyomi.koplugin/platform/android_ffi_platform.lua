@@ -1462,123 +1462,143 @@ function AndroidFFIServer:request(request)
             }
         else
             -- PENDING - do work during poll
-            -- Step 1: Fetch pages if not already done
-            if not job.pages then
-                addLog(self, "Fetching pages for job " .. job_id)
-                local pages, err = nil, nil
-                
-                if job.source_id == "en.mangadex" then
-                    pages, err = fetchMangaDexPages(job.chapter_id)
-                    if pages then
-                        addLog(self, "Got " .. tostring(#pages) .. " pages from MangaDex")
-                    else
-                        addLog(self, "Failed to fetch MangaDex pages: " .. tostring(err))
-                    end
-                elseif job.source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
-                    local pages_json = self.lib.rakuyomi_get_mangapill_pages(job.manga_id, job.chapter_id)
-                    if pages_json ~= nil then
-                        local pages_str = ffi.string(pages_json)
-                        self.lib.rakuyomi_free_string(pages_json)
-                        local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
-                        if ok then
-                            pages = parsed
-                            addLog(self, "Got " .. tostring(#pages) .. " pages from MangaPill")
+            -- Wrap in pcall to catch any errors
+            local ok, err = pcall(function()
+                -- Step 1: Fetch pages if not already done
+                if not job.pages then
+                    addLog(self, "Fetching pages for job " .. job_id)
+                    local pages, fetch_err = nil, nil
+                    
+                    if job.source_id == "en.mangadex" then
+                        pages, fetch_err = fetchMangaDexPages(job.chapter_id)
+                        if pages then
+                            addLog(self, "Got " .. tostring(#pages) .. " pages from MangaDex")
                         else
-                            err = "Failed to parse MangaPill response"
+                            addLog(self, "Failed to fetch MangaDex pages: " .. tostring(fetch_err))
+                        end
+                    elseif job.source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
+                        local pages_json = self.lib.rakuyomi_get_mangapill_pages(job.manga_id, job.chapter_id)
+                        if pages_json ~= nil then
+                            local pages_str = ffi.string(pages_json)
+                            self.lib.rakuyomi_free_string(pages_json)
+                            local parse_ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
+                            if parse_ok then
+                                pages = parsed
+                                addLog(self, "Got " .. tostring(#pages) .. " pages from MangaPill")
+                            else
+                                fetch_err = "Failed to parse MangaPill response"
+                            end
+                        else
+                            fetch_err = "MangaPill FFI returned nil"
+                        end
+                    elseif job.source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
+                        local pages_json = self.lib.rakuyomi_get_weebcentral_pages(job.manga_id, job.chapter_id)
+                        if pages_json ~= nil then
+                            local pages_str = ffi.string(pages_json)
+                            self.lib.rakuyomi_free_string(pages_json)
+                            local parse_ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
+                            if parse_ok then
+                                pages = parsed
+                                addLog(self, "Got " .. tostring(#pages) .. " pages from WeebCentral")
+                            else
+                                fetch_err = "Failed to parse WeebCentral response"
+                            end
+                        else
+                            fetch_err = "WeebCentral FFI returned nil"
                         end
                     else
-                        err = "MangaPill FFI returned nil"
+                        fetch_err = "Unknown source: " .. tostring(job.source_id)
                     end
-                elseif job.source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
-                    local pages_json = self.lib.rakuyomi_get_weebcentral_pages(job.manga_id, job.chapter_id)
-                    if pages_json ~= nil then
-                        local pages_str = ffi.string(pages_json)
-                        self.lib.rakuyomi_free_string(pages_json)
-                        local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
-                        if ok then
-                            pages = parsed
-                            addLog(self, "Got " .. tostring(#pages) .. " pages from WeebCentral")
-                        else
-                            err = "Failed to parse WeebCentral response"
-                        end
-                    else
-                        err = "WeebCentral FFI returned nil"
-                    end
-                else
-                    err = "Unknown source: " .. tostring(job.source_id)
-                end
-                
-                if pages and #pages > 0 then
-                    job.pages = pages
-                    job.total_pages = #pages
-                    job.current_page = 0
-                    job.temp_dir = "/sdcard/koreader/rakuyomi/temp/" .. job.manga_id .. "_" .. job.chapter_id
-                    os.execute("mkdir -p " .. job.temp_dir)
-                    addLog(self, "Set up temp dir: " .. job.temp_dir)
-                else
-                    job.status = "FAILED"
-                    job.error = err or "No pages found"
-                    addLog(self, "Job failed: " .. job.error)
-                end
-            end
-            
-            -- Step 2: Download next page if we have pages
-            if job.pages and job.current_page < job.total_pages then
-                local next_idx = job.current_page + 1
-                local page = job.pages[next_idx]
-                
-                if page and page.url then
-                    local page_path = job.temp_dir .. "/" .. string.format("%03d.jpg", next_idx)
-                    addLog(self, "Downloading page " .. tostring(next_idx) .. "/" .. tostring(job.total_pages) .. " from " .. page.url:sub(1, 50))
                     
-                    local ok, dl_err = downloadFile(page.url, page_path, 15) -- 15s timeout per image
-                    
-                    if ok then
-                        job.current_page = next_idx
-                        addLog(self, "Downloaded page " .. tostring(next_idx) .. " OK")
-                    else
-                        addLog(self, "Failed to download page " .. tostring(next_idx) .. ": " .. tostring(dl_err))
-                        -- Continue anyway, will check at end
-                    end
-                else
-                    job.current_page = next_idx -- Skip invalid page
-                end
-                
-                -- Check if done downloading all pages
-                if job.current_page >= job.total_pages then
-                    addLog(self, "All pages downloaded, creating CBZ...")
-                    
-                    -- Create CBZ
-                    local cbz_dir = "/sdcard/koreader/rakuyomi/chapters"
-                    os.execute("mkdir -p " .. cbz_dir)
-                    
-                    local cbz_filename = job.manga_id .. "_" .. job.chapter_id .. ".cbz"
-                    local cbz_path = cbz_dir .. "/" .. cbz_filename
-                    local zip_cmd = "cd " .. job.temp_dir .. " && zip -r " .. cbz_path .. " * 2>&1"
-                    
-                    addLog(self, "Running: " .. zip_cmd)
-                    local zip_ok = os.execute(zip_cmd)
-                    
-                    -- Clean up temp dir
-                    os.execute("rm -rf " .. job.temp_dir)
-                    
-                    if zip_ok then
-                        job.cbz_path = cbz_path
-                        job.status = "COMPLETED"
-                        addLog(self, "CBZ created: " .. cbz_path)
+                    if pages and #pages > 0 then
+                        job.pages = pages
+                        job.total_pages = #pages
+                        job.current_page = 0
+                        job.temp_dir = "/sdcard/koreader/rakuyomi/temp/" .. job.manga_id .. "_" .. job.chapter_id
+                        os.execute("mkdir -p " .. job.temp_dir)
+                        addLog(self, "Set up temp dir: " .. job.temp_dir)
                     else
                         job.status = "FAILED"
-                        job.error = "Failed to create CBZ"
-                        addLog(self, "CBZ creation failed")
+                        job.error = fetch_err or "No pages found"
+                        addLog(self, "Job failed: " .. job.error)
+                        return
                     end
                 end
-            end
+                
+                -- Step 2: Download next page if we have pages
+                if job.pages and job.current_page < job.total_pages then
+                    local next_idx = job.current_page + 1
+                    local page = job.pages[next_idx]
+                    
+                    if page and page.url then
+                        local page_path = job.temp_dir .. "/" .. string.format("%03d.jpg", next_idx)
+                        addLog(self, "Downloading page " .. tostring(next_idx) .. "/" .. tostring(job.total_pages) .. " from " .. page.url:sub(1, 50))
+                        
+                        local dl_ok, dl_err = downloadFile(page.url, page_path, 15)
+                        
+                        if dl_ok then
+                            job.current_page = next_idx
+                            addLog(self, "Downloaded page " .. tostring(next_idx) .. " OK")
+                        else
+                            addLog(self, "Failed to download page " .. tostring(next_idx) .. ": " .. tostring(dl_err))
+                            -- Continue anyway
+                            job.current_page = next_idx
+                        end
+                    else
+                        job.current_page = next_idx -- Skip invalid page
+                    end
+                    
+                    -- Check if done downloading all pages
+                    if job.current_page >= job.total_pages then
+                        addLog(self, "All pages downloaded, creating CBZ...")
+                        
+                        -- Create CBZ
+                        local cbz_dir = "/sdcard/koreader/rakuyomi/chapters"
+                        os.execute("mkdir -p " .. cbz_dir)
+                        
+                        local cbz_filename = job.manga_id .. "_" .. job.chapter_id .. ".cbz"
+                        local cbz_path = cbz_dir .. "/" .. cbz_filename
+                        local zip_cmd = "cd " .. job.temp_dir .. " && zip -r " .. cbz_path .. " * 2>&1"
+                        
+                        addLog(self, "Running: " .. zip_cmd)
+                        local zip_ok = os.execute(zip_cmd)
+                        
+                        -- Clean up temp dir
+                        os.execute("rm -rf " .. job.temp_dir)
+                        
+                        if zip_ok then
+                            job.cbz_path = cbz_path
+                            job.status = "COMPLETED"
+                            addLog(self, "CBZ created: " .. cbz_path)
+                        else
+                            job.status = "FAILED"
+                            job.error = "Failed to create CBZ"
+                            addLog(self, "CBZ creation failed")
+                        end
+                    end
+                end
+            end)
             
-            -- Return PENDING while work continues
-            job_details = {
-                type = "PENDING",
-                data = {current = job.current_page, total = job.total_pages}
-            }
+            if not ok then
+                job.status = "FAILED"
+                job.error = "Internal error: " .. tostring(err)
+                addLog(self, "Job polling error: " .. tostring(err))
+                job_details = {
+                    type = "FAILED",
+                    data = {message = job.error}
+                }
+            elseif job.status == "FAILED" then
+                job_details = {
+                    type = "FAILED",
+                    data = {message = job.error}
+                }
+            else
+                -- Return PENDING or current status
+                job_details = {
+                    type = "PENDING",
+                    data = {current = job.current_page, total = job.total_pages}
+                }
+            end
         end
         
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_details) }
