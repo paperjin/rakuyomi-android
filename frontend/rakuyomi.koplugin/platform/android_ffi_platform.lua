@@ -13,12 +13,37 @@ logger.info("Rakuyomi FFI Platform loading...")
 ffi.cdef[[
     int rakuyomi_init(const char* config_path);
     void rakuyomi_free_string(char* s);
+    char* rakuyomi_get_sources(void);
+    char* rakuyomi_get_source_lists(void);
+    int rakuyomi_install_source(const char* source_id);
     char* rakuyomi_get_settings(void);
     int rakuyomi_set_settings(const char* settings);
+    char* rakuyomi_search(const char* query, const char* source, int page);
+    char* rakuyomi_get_manga(const char* manga_id, const char* source);
+    char* rakuyomi_get_chapters(const char* manga_id, const char* source);
+    char* rakuyomi_get_library(void);
+    char* rakuyomi_get_pages(const char* manga_id, const char* chapter_id, const char* source);
+    int rakuyomi_health_check(void);
     char* rakuyomi_create_cbz(const char* cbz_path, const char* urls_json);
 ]]
 
--- Simple HTTP GET
+-- Helper to call FFI functions that return strings
+local function ffi_get_string(func_name, lib, ...)
+    local func = lib[func_name]
+    if not func then
+        logger.warn("FFI function not found: " .. func_name)
+        return nil
+    end
+    local ptr = func(...)
+    if ptr == nil then
+        return nil
+    end
+    local str = ffi.string(ptr)
+    lib.rakuyomi_free_string(ptr)
+    return str
+end
+
+-- Simple HTTP GET (fallback when FFI fails)
 local function http_get(url, timeout)
     timeout = timeout or 30
     local body = {}
@@ -30,7 +55,7 @@ local function http_get(url, timeout)
     return nil
 end
 
--- Fetch pages from MangaDex
+-- Fetch pages from MangaDex (fallback)
 local function fetchMangaDexPages(chapter_id)
     local url = "https://api.mangadex.org/at-home/server/" .. chapter_id
     local body = http_get(url, 15)
@@ -68,14 +93,25 @@ end
 function AndroidFFIServer:request(req)
     local path = req and req.path or ""
     logger.info("REQUEST: " .. path)
+    local lib = self.lib
     
     -- Health check
     if path == "/health-check" then
+        if lib then
+            local ok = lib.rakuyomi_health_check()
+            return { type = 'SUCCESS', status = 200, body = '{"status":"ok"}' }
+        end
         return { type = 'SUCCESS', status = 200, body = '{"status":"ok"}' }
     end
     
     -- Library
     if path == "/library" then
+        if lib then
+            local result = ffi_get_string("rakuyomi_get_library", lib)
+            if result then
+                return { type = 'SUCCESS', status = 200, body = result }
+            end
+        end
         return { type = 'SUCCESS', status = 200, body = '[]' }
     end
     
@@ -84,14 +120,81 @@ function AndroidFFIServer:request(req)
         return { type = 'SUCCESS', status = 200, body = '0' }
     end
     
+    -- Available sources
+    if path == "/available-sources" then
+        if lib then
+            local result = ffi_get_string("rakuyomi_get_sources", lib)
+            if result then
+                return { type = 'SUCCESS', status = 200, body = result }
+            end
+        end
+        return { type = 'SUCCESS', status = 200, body = '[]' }
+    end
+    
+    -- Installed sources
+    if path == "/installed-sources" then
+        if lib then
+            local result = ffi_get_string("rakuyomi_get_source_lists", lib)
+            if result then
+                return { type = 'SUCCESS', status = 200, body = result }
+            end
+        end
+        return { type = 'SUCCESS', status = 200, body = '[]' }
+    end
+    
     -- Search
     if path:match("^/mangas%?q=") then
+        local query = path:match("q=([^&]+)") or ""
+        query = query:gsub("%+", " ")
+        
+        if lib then
+            -- FFI search - default to mangadex
+            local result = ffi_get_string("rakuyomi_search", lib, query, "en.mangadex", 0)
+            if result then
+                return { type = 'SUCCESS', status = 200, body = result }
+            end
+        end
+        
+        -- Fallback to empty results
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode({{}, {}}) }
     end
     
     -- Chapters
     if path:match("^/mangas/[^/]+/[^/]+/chapters$") then
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters")
+        if source_id and manga_id and lib then
+            local result = ffi_get_string("rakuyomi_get_chapters", lib, manga_id, source_id)
+            if result then
+                return { type = 'SUCCESS', status = 200, body = result }
+            end
+        end
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode({{}, 0}) }
+    end
+    
+    -- Manga details
+    if path:match("^/mangas/[^/]+/[^/]+$") then
+        local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)$")
+        if source_id and manga_id and lib then
+            local result = ffi_get_string("rakuyomi_get_manga", lib, manga_id, source_id)
+            if result then
+                return { type = 'SUCCESS', status = 200, body = result }
+            end
+        end
+        return { type = 'SUCCESS', status = 200, body = "{}" }
+    end
+    
+    -- Install source
+    if path:match("^/available%-sources/[^/]+/install$") then
+        local source_id = path:match("^/available%-sources/([^/]+)/install$")
+        if source_id and lib then
+            local result = lib.rakuyomi_install_source(source_id)
+            if result == 0 then
+                return { type = 'SUCCESS', status = 200, body = '{"success":true}' }
+            else
+                return { type = 'SUCCESS', status = 200, body = '{"success":false}' }
+            end
+        end
+        return { type = 'SUCCESS', status = 200, body = '{"success":true}' }
     end
     
     -- Download chapter with REAL CBZ
@@ -133,14 +236,14 @@ function AndroidFFIServer:request(req)
         
         -- Call Rust FFI to create CBZ
         local urls_json = rapidjson.encode(urls)
-        local result_ptr = self.lib.rakuyomi_create_cbz(cbz_path, urls_json)
+        local result_ptr = lib.rakuyomi_create_cbz(cbz_path, urls_json)
         
         if result_ptr == nil then
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="FFI returned null"}}) }
         end
         
         local result_str = ffi.string(result_ptr)
-        self.lib.rakuyomi_free_string(result_ptr)
+        lib.rakuyomi_free_string(result_ptr)
         
         local ok, result_data = pcall(function() return rapidjson.decode(result_str) end)
         if not ok then
@@ -158,7 +261,7 @@ function AndroidFFIServer:request(req)
     
     -- Job polling
     if path:match("^/jobs/[^/]+$") then
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="COMPLETED",data={"",{}}}) }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="PENDING",data={}}) }
     end
     
     -- Default
@@ -188,6 +291,8 @@ function M:startServer()
     local lib = load_lib()
     if lib then
         lib.rakuyomi_init("/sdcard/koreader")
+    else
+        logger.warn("Failed to load FFI library - using fallback mode")
     end
     return AndroidFFIServer:new(lib)
 end
