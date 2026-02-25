@@ -115,25 +115,31 @@ function AndroidFFIServer:requestJson(path, method, body)
         local manga_id = path:match("^/mangas/[^/]+/([^/]+)/chapters")
         local chapters = {}
         
-        local feed_url = "https://api.mangadex.org/manga/" .. manga_id .. "/feed?translatedLanguage[]=en&limit=100"
-        local feed_body = http_get(feed_url, 15)
-        
-        if feed_body then
-            local ok, data = pcall(function() return rapidjson.decode(feed_body) end)
-            if ok and data and data.data then
-                for _, item in ipairs(data.data) do
-                    local attr = item.attributes or {}
-                    table.insert(chapters, {
-                        id = item.id,
-                        manga_id = manga_id,
-                        title = attr.title or "Chapter " .. tostring(attr.chapter),
-                        chapter_num = tonumber(attr.chapter) or 0,
-                        source_id = "en.mangadex",
-                        read = false
-                    })
+        if manga_id then
+            local feed_url = "https://api.mangadex.org/manga/" .. manga_id .. "/feed?translatedLanguage[]=en&limit=100"
+            local feed_body, feed_err = http_get(feed_url, 15)
+            
+            if feed_body then
+                local ok, data = pcall(function() return rapidjson.decode(feed_body) end)
+                if ok and data and data.data then
+                    for _, item in ipairs(data.data) do
+                        local attr = item.attributes or {}
+                        table.insert(chapters, {
+                            id = item.id,
+                            manga_id = manga_id,
+                            title = attr.title or "Chapter " .. tostring(attr.chapter),
+                            chapter_num = tonumber(attr.chapter) or 0,
+                            source_id = "en.mangadex",
+                            read = false
+                        })
+                    end
+                    table.sort(chapters, function(a, b) return (a.chapter_num or 0) > (b.chapter_num or 0) end)
                 end
-                table.sort(chapters, function(a, b) return (a.chapter_num or 0) > (b.chapter_num or 0) end)
+            else
+                logger.warn("Failed to fetch chapters: " .. tostring(feed_err))
             end
+        else
+            logger.warn("Could not extract manga_id from path: " .. tostring(path))
         end
         return rapidjson.encode(chapters)
     end
