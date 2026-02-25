@@ -23,26 +23,46 @@ else
     logger.warn("Android FFI: Could not load socket.http")
 end
 
--- Helper function to fetch data via HTTP GET
+-- Helper function to fetch data via HTTP GET with timeout
 local function http_get(url)
     if not http then
+        logger.warn("HTTP module not available")
         return nil, "HTTP module not available"
     end
     
+    logger.info("http_get: Starting request to " .. url:sub(1, 50))
+    
     local response_body = {}
-    local result, status_code, headers = http.request {
-        url = url,
-        sink = ltn12.sink.table(response_body),
-        method = "GET"
-    }
+    local result, status_code, headers
+    
+    -- Use pcall to catch any errors
+    local ok, err = pcall(function()
+        result, status_code, headers = http.request {
+            url = url,
+            sink = ltn12.sink.table(response_body),
+            method = "GET",
+            timeout = 30  -- 30 second timeout
+        }
+    end)
+    
+    if not ok then
+        logger.warn("http_get: Error during request: " .. tostring(err))
+        return nil, "HTTP error: " .. tostring(err)
+    end
+    
+    logger.info("http_get: result=" .. tostring(result) .. " status=" .. tostring(status_code))
     
     if result == nil then
+        logger.warn("http_get: Request failed with status: " .. tostring(status_code))
         return nil, "HTTP request failed: " .. tostring(status_code)
     end
     
     if type(status_code) == "number" and status_code == 200 then
-        return table.concat(response_body), nil
+        local body_str = table.concat(response_body)
+        logger.info("http_get: Success, body length=" .. tostring(#body_str))
+        return body_str, nil
     else
+        logger.warn("http_get: Non-200 status: " .. tostring(status_code))
         return nil, "HTTP error: " .. tostring(status_code)
     end
 end
