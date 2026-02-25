@@ -1354,33 +1354,43 @@ function AndroidFFIServer:request(request)
                 body = parsed
             end
         end
-        addLog(self, "Download job for manga: " .. tostring(body.manga_id) .. " chapter: " .. tostring(body.chapter_id) .. " source: " .. tostring(body.source_id))
         
-        -- Synchronous download - do everything now and return result
         local manga_id = body.manga_id
         local chapter_id = body.chapter_id
         local source_id = body.source_id
-        local job_id = "job-" .. tostring(os.time()) .. "-" .. tostring(math.random(1000))
         
-        -- Initialize download status
+        addLog(self, "Download request: manga=" .. tostring(manga_id) .. " chapter=" .. tostring(chapter_id) .. " source=" .. tostring(source_id))
+        
+        -- Generate job ID
+        local job_id = "job-" .. tostring(os.time()) .. "-" .. tostring(math.random(1000, 9999))
+        
+        -- Initialize job tracking
         if not _G.download_jobs then
             _G.download_jobs = {}
         end
         
-        addLog(self, "Starting synchronous CBZ download for job " .. job_id)
+        _G.download_jobs[job_id] = {
+            status = "PENDING",
+            manga_id = manga_id,
+            chapter_id = chapter_id,
+            source_id = source_id,
+            cbz_path = nil,
+            error = nil,
+            started_at = os.time()
+        }
         
-        -- Fetch pages from source
+        -- Fetch pages with timeout protection
         local pages = nil
-        local manga_title = manga_id
-        local chapter_title = "Chapter"
+        local fetch_error = nil
+        
+        addLog(self, "Fetching pages for source: " .. tostring(source_id))
         
         if source_id == "en.mangadex" then
-            -- Fetch pages from MangaDex
-            pages, err = fetchMangaDexPages(chapter_id)
+            pages, fetch_error = fetchMangaDexPages(chapter_id)
             if pages then
-                addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaDex")
+                addLog(self, "Got " .. tostring(#pages) .. " pages from MangaDex")
             else
-                addLog(self, "Failed to fetch MangaDex pages: " .. tostring(err))
+                addLog(self, "Failed to fetch MangaDex pages: " .. tostring(fetch_error))
             end
         elseif source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
             local pages_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
@@ -1390,8 +1400,12 @@ function AndroidFFIServer:request(request)
                 local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
                 if ok then
                     pages = parsed
-                    addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaPill")
+                    addLog(self, "Got " .. tostring(#pages) .. " pages from MangaPill")
+                else
+                    fetch_error = "Failed to parse MangaPill response"
                 end
+            else
+                fetch_error = "MangaPill FFI returned nil"
             end
         elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
             local pages_json = self.lib.rakuyomi_get_weebcentral_pages(manga_id, chapter_id)
@@ -1401,41 +1415,53 @@ function AndroidFFIServer:request(request)
                 local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
                 if ok then
                     pages = parsed
-                    addLog(self, "Fetched " .. tostring(#pages) .. " pages from WeebCentral")
+                    addLog(self, "Got " .. tostring(#pages) .. " pages from WeebCentral")
+                else
+                    fetch_error = "Failed to parse WeebCentral response"
                 end
-            end
-        end
-        
-        -- Create CBZ from pages
-        if pages and #pages > 0 then
-            addLog(self, "Creating CBZ from " .. tostring(#pages) .. " pages")
-            local cbz_path, err = createCBZFromPages(manga_id, chapter_id, pages, manga_title, chapter_title)
-            
-            if cbz_path then
-                _G.download_jobs[job_id] = {
-                    status = "COMPLETED",
-                    cbz_path = cbz_path,
-                    error = nil
-                }
-                addLog(self, "CBZ created: " .. cbz_path)
-                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_id) }
             else
-                _G.download_jobs[job_id] = {
-                    status = "FAILED",
-                    cbz_path = nil,
-                    error = err or "CBZ creation failed"
-                }
-                addLog(self, "CBZ creation failed: " .. tostring(err))
-                return { type = 'ERROR', status = 500, message = "Failed to create CBZ: " .. tostring(err), body = '{"error": "CBZ creation failed"}' }
+                fetch_error = "WeebCentral FFI returned nil"
             end
         else
-            _G.download_jobs[job_id] = {
-                status = "FAILED",
-                cbz_path = nil,
-                error = "No pages found"
+            fetch_error = "Unknown or unsupported source: " .. tostring(source_id)
+        end
+        
+        -- Check if we got pages
+        if not pages or #pages == 0 then
+            _G.download_jobs[job_id].status = "FAILED"
+            _G.download_jobs[job_id].error = fetch_error or "No pages found"
+            addLog(self, "Download failed: " .. tostring(fetch_error) .. " - returning error response")
+            return { 
+                type = 'ERROR', 
+                status = 404, 
+                message = "No pages found: " .. tostring(fetch_error), 
+                body = rapidjson.encode({error = "No pages", details = fetch_error})
             }
-            addLog(self, "No pages to download")
-            return { type = 'ERROR', status = 404, message = "No pages found for chapter", body = '{"error": "No pages"}' }
+        end
+        
+        -- Create CBZ
+        addLog(self, "Creating CBZ from " .. tostring(#pages) .. " pages...")
+        local cbz_path, create_error = createCBZFromPages(manga_id, chapter_id, pages, manga_id, "Chapter")
+        
+        if cbz_path then
+            _G.download_jobs[job_id].status = "COMPLETED"
+            _G.download_jobs[job_id].cbz_path = cbz_path
+            addLog(self, "SUCCESS: CBZ created at " .. cbz_path)
+            return { 
+                type = 'SUCCESS', 
+                status = 200, 
+                body = rapidjson.encode(job_id)
+            }
+        else
+            _G.download_jobs[job_id].status = "FAILED"
+            _G.download_jobs[job_id].error = create_error or "CBZ creation failed"
+            addLog(self, "FAILED: CBZ creation failed - " .. tostring(create_error))
+            return { 
+                type = 'ERROR', 
+                status = 500, 
+                message = "Failed to create CBZ: " .. tostring(create_error), 
+                body = rapidjson.encode({error = "CBZ creation failed", details = create_error})
+            }
         end
         
     elseif path:match("^/jobs/[^/]+$") then
