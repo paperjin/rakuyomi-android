@@ -1085,32 +1085,64 @@ function AndroidFFIServer:request(request)
         local source_id, manga_id, chapter_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters/([^/]+)/download$")
         addLog(self, "Downloading chapter via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id) .. " chapter=" .. tostring(chapter_id))
         
-        -- Try to fetch real pages from MangaDex
-        if chapter_id and not chapter_id:match("^mock-") then
-            logger.info("Fetching real pages from MangaDex for chapter: " .. chapter_id)
+        -- Route to ported sources first
+        local page_urls = {}
+        
+        if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
+            addLog(self, "Fetching pages from MangaPill")
+            local pages_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
+            if pages_json ~= nil then
+                local pages_str = ffi.string(pages_json)
+                self.lib.rakuyomi_free_string(pages_json)
+                local ok, pages = pcall(function() return rapidjson.decode(pages_str) end)
+                if ok and pages then
+                    for _, page in ipairs(pages) do
+                        table.insert(page_urls, page.url)
+                    end
+                    addLog(self, "Got " .. tostring(#page_urls) .. " pages from MangaPill")
+                end
+            end
+        elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
+            addLog(self, "Fetching pages from WeebCentral")
+            local pages_json = self.lib.rakuyomi_get_weebcentral_pages(manga_id, chapter_id)
+            if pages_json ~= nil then
+                local pages_str = ffi.string(pages_json)
+                self.lib.rakuyomi_free_string(pages_json)
+                local ok, pages = pcall(function() return rapidjson.decode(pages_str) end)
+                if ok and pages then
+                    for _, page in ipairs(pages) do
+                        table.insert(page_urls, page.url)
+                    end
+                    addLog(self, "Got " .. tostring(#page_urls) .. " pages from WeebCentral")
+                end
+            end
+        elseif chapter_id and not chapter_id:match("^mock-") then
+            -- Try MangaDex for other sources
+            addLog(self, "Fetching pages from MangaDex for chapter: " .. chapter_id)
             local pages, err = fetchMangaDexPages(chapter_id)
             
             if pages and #pages > 0 then
-                -- For now, return the first page URL as the "chapter path"
-                -- In a real implementation, we'd download all pages and create a CBZ
-                -- For testing, just return success with the first page
-                local page_urls = {}
                 for _, page in ipairs(pages) do
                     table.insert(page_urls, page.url)
                 end
-                logger.info("Downloaded chapter with " .. tostring(#page_urls) .. " pages")
-                -- Return first page for now (would need to create CBZ)
-                local response_body = {
-                    page_urls[1],  -- Just return first page URL for now
-                    {}
-                }
-                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+                addLog(self, "Got " .. tostring(#page_urls) .. " pages from MangaDex")
             else
-                logger.warn("Failed to fetch pages: " .. tostring(err) .. ", using mock")
+                addLog(self, "Failed to fetch pages from MangaDex: " .. tostring(err))
             end
         end
         
+        -- Return the chapter data
+        if #page_urls > 0 then
+            -- Return first page URL for now (would need to create CBZ for full implementation)
+            local response_body = {
+                page_urls[1],
+                {}
+            }
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+        end
+        
         -- Fallback to mock
+        addLog(self, "No pages found, using mock")
         local response_body = {
             "/sdcard/koreader/rakuyomi/mock-chapter.cbz",
             {}
@@ -1286,17 +1318,39 @@ function AndroidFFIServer:request(request)
         local chapter_id = path:match("^/chapters/([^/]+)/pages$")
         addLog(self, "Fetching pages via FFI for chapter: " .. tostring(chapter_id))
         
-        -- Return mock pages (array of image URLs)
+        -- Try to get source_id and manga_id from request body or query params
+        local source_id = request.query_params and request.query_params.source_id
+        local manga_id = request.query_params and request.query_params.manga_id
+        
+        -- If we have source info, route to the appropriate source
+        if source_id and manga_id and chapter_id then
+            addLog(self, "Fetching pages with source=" .. source_id .. " manga=" .. manga_id)
+            if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
+                result_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
+                if result_json ~= nil then
+                    local json_str = ffi.string(result_json)
+                    self.lib.rakuyomi_free_string(result_json)
+                    return { type = 'SUCCESS', status = 200, body = json_str }
+                end
+            elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
+                result_json = self.lib.rakuyomi_get_weebcentral_pages(manga_id, chapter_id)
+                if result_json ~= nil then
+                    local json_str = ffi.string(result_json)
+                    self.lib.rakuyomi_free_string(result_json)
+                    return { type = 'SUCCESS', status = 200, body = json_str }
+                end
+            end
+        end
+        
+        -- Fallback: return mock pages if no source info or FFI call failed
+        addLog(self, "No source info or FFI failed, returning mock pages")
         local mock_pages = {}
         for i = 1, 5 do
             table.insert(mock_pages, {
                 index = i,
                 url = "https://example.com/mock-page-" .. tostring(i) .. ".jpg",
-                -- In a real implementation, these would be base64 or local file paths
             })
         end
-        
-        -- Return pages array directly
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_pages) }
         
     elseif path:match("^/jobs/download%-chapter") then
