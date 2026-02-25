@@ -1,5 +1,5 @@
--- Simple version: Download first page to local file, avoid CBZ crash
--- No os.execute(), creates single-page "CBZ" (just the image)
+-- FFI Platform with REAL CBZ support via Rust library
+-- Uses rakuyomi_create_cbz FFI function to create archives safely
 
 local logger = require("logger")
 local ffi = require("ffi")
@@ -8,23 +8,15 @@ local ltn12 = require("ltn12")
 local http = require("socket.http")
 local util = require("util")
 
-logger.info("Simple FFI Platform loading...")
+logger.info("Rakuyomi FFI Platform loading...")
 
 ffi.cdef[[
     int rakuyomi_init(const char* config_path);
     void rakuyomi_free_string(char* s);
     char* rakuyomi_get_settings(void);
     int rakuyomi_set_settings(const char* settings);
+    char* rakuyomi_create_cbz(const char* cbz_path, const char* urls_json);
 ]]
-
--- Download file to path
-local function downloadFile(url, output_path)
-    local file = io.open(output_path, "wb")
-    if not file then return nil end
-    local result = http.request{ url = url, sink = ltn12.sink.file(file) }
-    if result then return output_path end
-    return nil
-end
 
 -- Simple HTTP GET
 local function http_get(url, timeout)
@@ -102,7 +94,7 @@ function AndroidFFIServer:request(req)
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode({{}, 0}) }
     end
     
-    -- Download chapter
+    -- Download chapter with REAL CBZ
     if path:match("^/jobs/download%-chapter$") then
         local body = {}
         if req.body then
@@ -126,22 +118,42 @@ function AndroidFFIServer:request(req)
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="No pages found"}}) }
         end
         
-        -- Download first page to temp file
-        local temp_dir = "/sdcard/koreader/rakuyomi/temp"
-        os.execute("mkdir -p " .. temp_dir)
-        local img_path = temp_dir .. "/" .. chapter_id .. "_page1.jpg"
+        -- Prepare CBZ output path
+        local cbz_dir = "/sdcard/koreader/rakuyomi/chapters"
+        os.execute("mkdir -p " .. cbz_dir)
+        local cbz_path = cbz_dir .. "/" .. (manga_id or "unknown") .. "_" .. chapter_id .. ".cbz"
         
-        logger.info("Downloading first page to: " .. img_path)
-        local downloaded = downloadFile(pages[1].url, img_path)
-        
-        if not downloaded then
-            return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="Failed to download page"}}) }
+        -- Get URLs as array
+        local urls = {}
+        for _, page in ipairs(pages) do
+            table.insert(urls, page.url)
         end
         
-        -- For KOReader, we need to return a path it can open
-        -- Single image works, or we could create a minimal CBZ
-        logger.info("Downloaded to: " .. img_path)
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="COMPLETED",data={img_path, {}}}) }
+        logger.info("Creating CBZ with " .. #urls .. " pages via FFI")
+        
+        -- Call Rust FFI to create CBZ
+        local urls_json = rapidjson.encode(urls)
+        local result_ptr = self.lib.rakuyomi_create_cbz(cbz_path, urls_json)
+        
+        if result_ptr == nil then
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="FFI returned null"}}) }
+        end
+        
+        local result_str = ffi.string(result_ptr)
+        self.lib.rakuyomi_free_string(result_ptr)
+        
+        local ok, result_data = pcall(function() return rapidjson.decode(result_str) end)
+        if not ok then
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="Failed to parse FFI result"}}) }
+        end
+        
+        if result_data.success then
+            logger.info("CBZ created: " .. result_data.path)
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="COMPLETED",data={result_data.path, {}}}) }
+        else
+            logger.warn("CBZ failed: " .. (result_data.error or "Unknown"))
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message=result_data.error or "CBZ creation failed"}}) }
+        end
     end
     
     -- Job polling

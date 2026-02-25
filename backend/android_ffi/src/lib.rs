@@ -1111,3 +1111,51 @@ pub unsafe extern "C" fn rakuyomi_get_weebcentral_pages(
     
     string_to_c_str(result)
 }
+
+mod cbz;
+
+/// Create CBZ file from image URLs
+/// cbz_path: output path for CBZ file
+/// urls_json: JSON array of image URLs
+/// Returns: path to created CBZ or error message
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_create_cbz(
+    cbz_path: *const c_char,
+    urls_json: *const c_char,
+) -> *mut c_char {
+    let cbz_path_str = match c_str_to_string(cbz_path) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"{"success":false,"error":"Invalid CBZ path"}"#.to_string()),
+    };
+    
+    let urls_str = match c_str_to_string(urls_json) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"{"success":false,"error":"Invalid URLs"}"#.to_string()),
+    };
+    
+    let urls: Vec<String> = match serde_json::from_str(&urls_str) {
+        Ok(u) => u,
+        Err(_) => return string_to_c_str(r#"{"success":false,"error":"Invalid JSON"}"#.to_string()),
+    };
+    
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        match cbz::create_cbz(&cbz_path_str, urls).await {
+            Ok(path) => {
+                serde_json::to_string(&serde_json::json!({
+                    "success": true,
+                    "path": path
+                })).unwrap_or_else(|_| r#"{"success":false}"#.to_string())
+            }
+            Err(e) => {
+                serde_json::to_string(&serde_json::json!({
+                    "success": false,
+                    "error": e
+                })).unwrap_or_else(|_| r#"{"success":false}"#.to_string())
+            }
+        }
+    });
+    
+    string_to_c_str(result)
+}
