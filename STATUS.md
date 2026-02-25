@@ -86,7 +86,14 @@ cp -r rakuyomi-android/frontend/rakuyomi.koplugin /sdcard/koreader/plugins/
 # IMPORTANT: Copy library to internal storage
 adb shell cp /sdcard/koreader/plugins/rakuyomi.koplugin/libs/librakuyomi.so /data/data/org.koreader.launcher/files/librakuyomi.so
 adb shell chmod 755 /data/data/org.koreader.launcher/files/librakuyomi.so
+
+# CRITICAL: Fix SELinux security context (Android 10+)
+adb shell restorecon /data/data/org.koreader.launcher/files/librakuyomi.so
 ```
+
+**Note:** The `restorecon` step fixes Android SELinux permissions that prevent
+KOReader from loading the library. Without it you'll get:
+"Failed to load rakuyomi library: Could not find librakuyomi.so"
 
 ### Build From Source (Steam Deck/Linux)
 ```bash

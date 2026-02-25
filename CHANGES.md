@@ -4,6 +4,28 @@
 
 ### Summary of Changes Made
 
+#### 8. SELinux Context Fix (Android 10+)
+**Files Modified:**
+- `STATUS.md`
+
+**Changes:**
+- Added `restorecon` step to installation instructions
+- Documents SELinux security context requirement for library loading
+- **Result:** Plugin loads successfully on Android devices with SELinux enforcing
+
+**Fix:**
+```bash
+adb shell cp /sdcard/koreader/plugins/rakuyomi.koplugin/libs/librakuyomi.so \
+    /data/data/org.koreader.launcher/files/librakuyomi.so
+adb shell chmod 755 /data/data/org.koreader.launcher/files/librakuyomi.so
+adb shell restorecon /data/data/org.koreader.launcher/files/librakuyomi.so
+```
+
+**Without restorecon:** Plugin fails to load with "Could not find librakuyomi.so"  
+**With restorecon:** Library loads correctly
+
+---
+
 #### 7. Source Installation Endpoint (Backend + Frontend)
 **Files Modified:**
 - `backend/android_ffi/src/lib.rs`
