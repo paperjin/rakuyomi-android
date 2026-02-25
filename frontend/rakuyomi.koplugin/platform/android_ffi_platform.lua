@@ -398,31 +398,50 @@ end
 
 -- Download a file via HTTP
 local function downloadFile(url, output_path)
-    logger.info("Downloading file from: " .. url:sub(1, 60))
+    logger.info("Downloading: " .. url:sub(1, 60) .. "...")
     
     if not http then
+        logger.warn("HTTP module not available")
         return nil, "HTTP module not available"
     end
     
-    local file = io.open(output_path, "wb")
-    if not file then
-        return nil, "Failed to open file for writing: " .. output_path
+    -- Create parent directory if needed
+    local dir = output_path:match("^(.*)/[^/]+$")
+    if dir then
+        os.execute("mkdir -p " .. dir)
     end
     
+    local file, file_err = io.open(output_path, "wb")
+    if not file then
+        logger.warn("Failed to open file: " .. tostring(file_err))
+        return nil, "Failed to open file: " .. tostring(file_err)
+    end
+    
+    logger.info("Starting HTTP request...")
     local result, status_code = http.request{
         url = url,
         sink = ltn12.sink.file(file),
-        timeout = 60  -- 60 second timeout for image download
+        timeout = 30  -- 30 second timeout
     }
     
+    -- Always close file
+    file:close()
+    
+    logger.info("HTTP result: " .. tostring(result) .. " status: " .. tostring(status_code))
+    
     if result == nil then
+        logger.warn("Download failed: " .. tostring(status_code))
+        -- Remove failed file
+        os.remove(output_path)
         return nil, "Download failed: " .. tostring(status_code)
     end
     
     if type(status_code) == "number" and status_code == 200 then
-        logger.info("Downloaded successfully to: " .. output_path)
+        logger.info("Downloaded OK: " .. output_path)
         return true, nil
     else
+        logger.warn("HTTP error code: " .. tostring(status_code))
+        os.remove(output_path)
         return nil, "HTTP error: " .. tostring(status_code)
     end
 end
