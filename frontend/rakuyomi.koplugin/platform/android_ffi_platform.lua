@@ -237,6 +237,10 @@ ffi.cdef[[
     char* rakuyomi_get_chapters(const char* source_id, const char* manga_id);
     char* rakuyomi_get_pages(const char* source_id, const char* manga_id, const char* chapter_id);
     int rakuyomi_download_page(const char* source_id, const char* manga_id, const char* chapter_id, const char* page_url, const char* output_path);
+    char* rakuyomi_search_mangapill(const char* query, int page);
+    char* rakuyomi_get_mangapill_manga(const char* manga_id);
+    char* rakuyomi_get_mangapill_chapters(const char* manga_id);
+    char* rakuyomi_get_mangapill_pages(const char* manga_id, const char* chapter_id);
     int rakuyomi_health_check(void);
     char* rakuyomi_get_library(void);
     char* rakuyomi_get_settings(void);
@@ -407,10 +411,16 @@ function AndroidFFIServer:request(request)
     elseif path:match("^/api/search") then
         local source_id = request.query_params and request.query_params.source_id
         local query = request.query_params and request.query_params.query
+        local page = request.query_params and tonumber(request.query_params.page) or 1
         
         if source_id and query then
             addLog(self, "Searching source " .. source_id .. " for: " .. query)
-            result_json = self.lib.rakuyomi_search(source_id, query)
+            -- Route to MangaPill if source_id matches
+            if source_id == "en.mangapill" and self.lib.rakuyomi_search_mangapill then
+                result_json = self.lib.rakuyomi_search_mangapill(query, page)
+            else
+                result_json = self.lib.rakuyomi_search(source_id, query)
+            end
         else
             error_msg = "Missing source_id or query parameter"
         end
@@ -421,7 +431,11 @@ function AndroidFFIServer:request(request)
         
         if source_id and manga_id then
             addLog(self, "Fetching manga " .. manga_id .. " from source " .. source_id)
-            result_json = self.lib.rakuyomi_get_manga(source_id, manga_id)
+            if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_manga then
+                result_json = self.lib.rakuyomi_get_mangapill_manga(manga_id)
+            else
+                result_json = self.lib.rakuyomi_get_manga(source_id, manga_id)
+            end
         else
             error_msg = "Missing source_id or manga_id parameter"
         end
@@ -432,7 +446,11 @@ function AndroidFFIServer:request(request)
         
         if source_id and manga_id then
             addLog(self, "Fetching chapters for manga " .. manga_id)
-            result_json = self.lib.rakuyomi_get_chapters(source_id, manga_id)
+            if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_chapters then
+                result_json = self.lib.rakuyomi_get_mangapill_chapters(manga_id)
+            else
+                result_json = self.lib.rakuyomi_get_chapters(source_id, manga_id)
+            end
         else
             error_msg = "Missing source_id or manga_id parameter"
         end
@@ -444,7 +462,11 @@ function AndroidFFIServer:request(request)
 
         if source_id and manga_id and chapter_id then
             addLog(self, "Fetching pages for chapter " .. chapter_id)
-            result_json = self.lib.rakuyomi_get_pages(source_id, manga_id, chapter_id)
+            if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
+                result_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
+            else
+                result_json = self.lib.rakuyomi_get_pages(source_id, manga_id, chapter_id)
+            end
         else
             error_msg = "Missing source_id, manga_id, or chapter_id parameter"
         end
