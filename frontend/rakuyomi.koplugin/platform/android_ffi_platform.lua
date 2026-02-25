@@ -241,6 +241,10 @@ ffi.cdef[[
     char* rakuyomi_get_mangapill_manga(const char* manga_id);
     char* rakuyomi_get_mangapill_chapters(const char* manga_id);
     char* rakuyomi_get_mangapill_pages(const char* manga_id, const char* chapter_id);
+    char* rakuyomi_search_weebcentral(const char* query, int page);
+    char* rakuyomi_get_weebcentral_manga(const char* manga_id);
+    char* rakuyomi_get_weebcentral_chapters(const char* manga_id);
+    char* rakuyomi_get_weebcentral_pages(const char* manga_id, const char* chapter_id);
     int rakuyomi_health_check(void);
     char* rakuyomi_get_library(void);
     char* rakuyomi_get_settings(void);
@@ -418,6 +422,8 @@ function AndroidFFIServer:request(request)
             -- Route to MangaPill if source_id matches
             if source_id == "en.mangapill" and self.lib.rakuyomi_search_mangapill then
                 result_json = self.lib.rakuyomi_search_mangapill(query, page)
+            elseif source_id == "en.weebcentral" and self.lib.rakuyomi_search_weebcentral then
+                result_json = self.lib.rakuyomi_search_weebcentral(query, page)
             else
                 result_json = self.lib.rakuyomi_search(source_id, query)
             end
@@ -433,6 +439,8 @@ function AndroidFFIServer:request(request)
             addLog(self, "Fetching manga " .. manga_id .. " from source " .. source_id)
             if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_manga then
                 result_json = self.lib.rakuyomi_get_mangapill_manga(manga_id)
+            elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_manga then
+                result_json = self.lib.rakuyomi_get_weebcentral_manga(manga_id)
             else
                 result_json = self.lib.rakuyomi_get_manga(source_id, manga_id)
             end
@@ -448,6 +456,8 @@ function AndroidFFIServer:request(request)
             addLog(self, "Fetching chapters for manga " .. manga_id)
             if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_chapters then
                 result_json = self.lib.rakuyomi_get_mangapill_chapters(manga_id)
+            elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_chapters then
+                result_json = self.lib.rakuyomi_get_weebcentral_chapters(manga_id)
             else
                 result_json = self.lib.rakuyomi_get_chapters(source_id, manga_id)
             end
@@ -464,6 +474,8 @@ function AndroidFFIServer:request(request)
             addLog(self, "Fetching pages for chapter " .. chapter_id)
             if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
                 result_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
+            elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
+                result_json = self.lib.rakuyomi_get_weebcentral_pages(manga_id, chapter_id)
             else
                 result_json = self.lib.rakuyomi_get_pages(source_id, manga_id, chapter_id)
             end

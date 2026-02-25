@@ -958,3 +958,111 @@ pub unsafe extern "C" fn rakuyomi_get_mangapill_pages(
     
     string_to_c_str(result)
 }
+
+// ============================================================================
+// WeebCentral Source FFI Functions
+// ============================================================================
+/// Search weebcentral
+/// Returns JSON array of manga results
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_search_weebcentral(query: *const c_char, page: c_int) -> *mut c_char {
+    let query_str = match c_str_to_string(query) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"[]"#.to_string()),
+    };
+    
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        match sources::weebcentral::search_weebcentral(&query_str, page).await {
+            Ok(json) => serde_json::to_string(&json).unwrap_or_else(|_| r#"[]"#.to_string()),
+            Err(e) => {
+                eprintln!("WeebCentral search error: {}", e);
+                r#"[]"#.to_string()
+            }
+        }
+    });
+    
+    string_to_c_str(result)
+}
+
+/// Get manga details from WeebCentral
+/// Returns JSON manga object
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_get_weebcentral_manga(manga_id: *const c_char) -> *mut c_char {
+    let manga_id_str = match c_str_to_string(manga_id) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"{}"#.to_string()),
+    };
+    
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        match sources::weebcentral::get_manga_details(&manga_id_str).await {
+            Ok(json) => serde_json::to_string(&json).unwrap_or_else(|_| r#"{}"#.to_string()),
+            Err(e) => {
+                eprintln!("WeebCentral manga error: {}", e);
+                r#"{}"#.to_string()
+            }
+        }
+    });
+    
+    string_to_c_str(result)
+}
+
+/// Get chapter list from WeebCentral
+/// Returns JSON array of chapters
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_get_weebcentral_chapters(manga_id: *const c_char) -> *mut c_char {
+    let manga_id_str = match c_str_to_string(manga_id) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"[]"#.to_string()),
+    };
+    
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        match sources::weebcentral::get_chapter_list(&manga_id_str).await {
+            Ok(json) => serde_json::to_string(&json).unwrap_or_else(|_| r#"[]"#.to_string()),
+            Err(e) => {
+                eprintln!("WeebCentral chapters error: {}", e);
+                r#"[]"#.to_string()
+            }
+        }
+    });
+    
+    string_to_c_str(result)
+}
+
+/// Get page list from WeebCentral chapter
+/// Returns JSON array of pages
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_get_weebcentral_pages(
+    _manga_id: *const c_char,
+    chapter_id: *const c_char,
+) -> *mut c_char {
+    let _manga_id_str = match c_str_to_string(_manga_id) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"[]"#.to_string()),
+    };
+    
+    let chapter_id_str = match c_str_to_string(chapter_id) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"[]"#.to_string()),
+    };
+    
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        match sources::weebcentral::get_page_list(&_manga_id_str,
+&chapter_id_str).await {
+            Ok(json) => serde_json::to_string(&json).unwrap_or_else(|_| r#"[]"#.to_string()),
+            Err(e) => {
+                eprintln!("WeebCentral pages error: {}", e);
+                r#"[]"#.to_string()
+            }
+        }
+    });
+    
+    string_to_c_str(result)
+}
