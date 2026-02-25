@@ -1462,8 +1462,7 @@ function AndroidFFIServer:request(request)
             }
         else
             -- PENDING - do work during poll
-            -- Wrap in pcall to catch any errors
-            local ok, err = pcall(function()
+            local work_ok, work_err = pcall(function()
                 -- Step 1: Fetch pages if not already done
                 if not job.pages then
                     addLog(self, "Fetching pages for job " .. job_id)
@@ -1521,18 +1520,17 @@ function AndroidFFIServer:request(request)
                         job.status = "FAILED"
                         job.error = fetch_err or "No pages found"
                         addLog(self, "Job failed: " .. job.error)
-                        return
-                    end
+                        -- Don't return here - let it fall through to response building
                 end
                 
-                -- Step 2: Download next page if we have pages
-                if job.pages and job.current_page < job.total_pages then
+                -- Step 2: Download next page if we have pages (only if still PENDING)
+                if job.status == "PENDING" and job.pages and job.current_page < job.total_pages then
                     local next_idx = job.current_page + 1
                     local page = job.pages[next_idx]
                     
                     if page and page.url then
                         local page_path = job.temp_dir .. "/" .. string.format("%03d.jpg", next_idx)
-                        addLog(self, "Downloading page " .. tostring(next_idx) .. "/" .. tostring(job.total_pages) .. " from " .. page.url:sub(1, 50))
+                        addLog(self, "Downloading page " .. tostring(next_idx) .. "/" .. tostring(job.total_pages))
                         
                         local dl_ok, dl_err = downloadFile(page.url, page_path, 15)
                         
@@ -1540,30 +1538,26 @@ function AndroidFFIServer:request(request)
                             job.current_page = next_idx
                             addLog(self, "Downloaded page " .. tostring(next_idx) .. " OK")
                         else
-                            addLog(self, "Failed to download page " .. tostring(next_idx) .. ": " .. tostring(dl_err))
-                            -- Continue anyway
-                            job.current_page = next_idx
+                            addLog(self, "Failed to download page: " .. tostring(dl_err))
+                            job.current_page = next_idx  -- Continue anyway
                         end
                     else
                         job.current_page = next_idx -- Skip invalid page
                     end
                     
-                    -- Check if done downloading all pages
+                    -- Check if all pages downloaded
                     if job.current_page >= job.total_pages then
-                        addLog(self, "All pages downloaded, creating CBZ...")
+                        addLog(self, "Creating CBZ with " .. tostring(job.total_pages) .. " pages...")
                         
-                        -- Create CBZ
                         local cbz_dir = "/sdcard/koreader/rakuyomi/chapters"
                         os.execute("mkdir -p " .. cbz_dir)
                         
                         local cbz_filename = job.manga_id .. "_" .. job.chapter_id .. ".cbz"
                         local cbz_path = cbz_dir .. "/" .. cbz_filename
-                        local zip_cmd = "cd " .. job.temp_dir .. " && zip -r " .. cbz_path .. " * 2>&1"
+                        local zip_cmd = "cd " .. job.temp_dir .. " && zip -r " .. cbz_path .. " * 2>/dev/null"
                         
-                        addLog(self, "Running: " .. zip_cmd)
+                        addLog(self, "Running zip...")
                         local zip_ok = os.execute(zip_cmd)
-                        
-                        -- Clean up temp dir
                         os.execute("rm -rf " .. job.temp_dir)
                         
                         if zip_ok then
@@ -1579,27 +1573,21 @@ function AndroidFFIServer:request(request)
                 end
             end)
             
-            if not ok then
+            -- Handle any errors from pcall
+            if not work_ok then
                 job.status = "FAILED"
-                job.error = "Internal error: " .. tostring(err)
-                addLog(self, "Job polling error: " .. tostring(err))
-                job_details = {
-                    type = "FAILED",
-                    data = {message = job.error}
-                }
-            elseif job.status == "FAILED" then
-                job_details = {
-                    type = "FAILED",
-                    data = {message = job.error}
-                }
-            else
-                -- Return PENDING or current status
-                job_details = {
-                    type = "PENDING",
-                    data = {current = job.current_page, total = job.total_pages}
-                }
+                job.error = "Download error: " .. tostring(work_err)
+                addLog(self, "Job error: " .. tostring(work_err))
             end
-        end
+            
+            -- Build response based on current status
+            if job.status == "COMPLETED" then
+                job_details = { type = "COMPLETED", data = {job.cbz_path, {}} }
+            elseif job.status == "FAILED" then
+                job_details = { type = "FAILED", data = {message = job.error or "Download failed"} }
+            else
+                job_details = { type = "PENDING", data = {current = job.current_page, total = job.total_pages} }
+            end
         
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_details) }
         
