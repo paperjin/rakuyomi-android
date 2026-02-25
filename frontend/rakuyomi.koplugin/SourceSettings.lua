@@ -206,6 +206,11 @@ function SourceSettings:init()
       width = self.item_width,
       alignment = "center",
     })
+    -- Add some spacing so it's not just a line
+    table.insert(vertical_group, VerticalGroup:new { 
+      align = "left",
+      dimen = Geom:new { h = Screen:getHeight() * 0.3 },
+    })
   end
 
   self.title_bar = TitleBar:new {
@@ -276,9 +281,20 @@ function SourceSettings:fetchAndShow(source_id, onReturnCallback)
     return
   end
   
+  -- Check if there are actually any settings to show
+  local setting_definitions = definitions_response.body
+  if not setting_definitions or #setting_definitions == 0 then
+    local InfoMessage = require("ui/widget/infomessage")
+    UIManager:show(InfoMessage:new{
+      text = _("No settings available for this source."),
+      timeout = 2,
+    })
+    return
+  end
+
   local ui = SourceSettings:new {
     source_id = source_id,
-    setting_definitions = definitions_response.body,
+    setting_definitions = setting_definitions,
     stored_settings = settings_response.body or {},
     on_return_callback = onReturnCallback,
     width = Screen:getWidth(),
