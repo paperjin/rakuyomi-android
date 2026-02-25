@@ -140,16 +140,27 @@ function AndroidFFIServer:request(req)
         return { type = 'SUCCESS', status = 200, body = '{"sources":[]}' }
     end
     
-    -- Installed sources
+    -- Installed sources - should return sources with installed=true, not source list URLs
     if path == "/installed-sources" then
         if lib then
-            logger.info("Calling rakuyomi_get_source_lists...")
-            local result = ffi_get_string("rakuyomi_get_source_lists", lib)
+            logger.info("Calling rakuyomi_get_sources for installed...")
+            local result = ffi_get_string("rakuyomi_get_sources", lib)
             if result then
-                logger.info("Got source lists: " .. result:sub(1, 100))
+                logger.info("Got sources: " .. result:sub(1, 100))
+                -- Filter to only installed sources
+                local ok, all_sources = pcall(function() return rapidjson.decode(result) end)
+                if ok and all_sources then
+                    local installed = {}
+                    for _, src in ipairs(all_sources) do
+                        if src.installed then
+                            table.insert(installed, src)
+                        end
+                    end
+                    return { type = 'SUCCESS', status = 200, body = rapidjson.encode(installed) }
+                end
                 return { type = 'SUCCESS', status = 200, body = result }
             else
-                logger.warn("rakuyomi_get_source_lists returned nil")
+                logger.warn("rakuyomi_get_sources returned nil")
             end
         else
             logger.warn("Library not loaded for /installed-sources")

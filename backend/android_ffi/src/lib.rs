@@ -152,6 +152,8 @@ struct SourceListItem {
     lang: String,
     #[serde(alias = "nsfw")]
     nsfw: i32,
+    #[serde(default)]
+    version: Option<String>,
 }
 
 /// Source information
@@ -163,6 +165,8 @@ struct SourceInfo {
     #[serde(alias = "sourceOfSource")]
     source_of_source: String,
     installed: bool,
+    #[serde(default)]
+    version: String,
 }
 
 /// Get list of available sources
@@ -201,6 +205,7 @@ pub unsafe extern "C" fn rakuyomi_get_sources() -> *mut c_char {
             lang: "en".to_string(),
             source_of_source: "built-in".to_string(),
             installed: true,  // Built-in sources are always "installed"
+            version: "1.0.0".to_string(),
         });
         
         all_sources.push(SourceInfo {
@@ -209,6 +214,7 @@ pub unsafe extern "C" fn rakuyomi_get_sources() -> *mut c_char {
             lang: "en".to_string(),
             source_of_source: "built-in".to_string(),
             installed: true,
+            version: "1.0.0".to_string(),
         });
         
         // Fetch from each source list
@@ -244,6 +250,7 @@ pub unsafe extern "C" fn rakuyomi_get_sources() -> *mut c_char {
                                         lang: source.lang,
                                         source_of_source: domain.clone(),
                                         installed: false,
+                                        version: source.version.unwrap_or_default(),
                                     });
                                 }
                             }
