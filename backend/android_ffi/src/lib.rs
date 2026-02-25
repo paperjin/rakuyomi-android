@@ -194,6 +194,23 @@ pub unsafe extern "C" fn rakuyomi_get_sources() -> *mut c_char {
         
         let mut all_sources: Vec<SourceInfo> = Vec::new();
         
+        // Add built-in ported sources (always available)
+        all_sources.push(SourceInfo {
+            id: "en.mangapill".to_string(),
+            name: "MangaPill".to_string(),
+            lang: "en".to_string(),
+            source_of_source: "built-in".to_string(),
+            installed: true,  // Built-in sources are always "installed"
+        });
+        
+        all_sources.push(SourceInfo {
+            id: "en.weebcentral".to_string(),
+            name: "WeebCentral".to_string(),
+            lang: "en".to_string(),
+            source_of_source: "built-in".to_string(),
+            installed: true,
+        });
+        
         // Fetch from each source list
         for url_value in source_lists {
             let url = match url_value.as_str() {
