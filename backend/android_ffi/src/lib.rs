@@ -379,7 +379,7 @@ pub unsafe extern "C" fn rakuyomi_install_source(source_id: *const c_char) -> c_
                     // Download the .aix file
                     eprintln!("Downloading source from: {}", aix_url);
                     
-                    let aix_content = match state.http_client.get(aix_url).send().await {
+                    let aix_content = match state.http_client.get(aix_url.clone()).send().await {
                         Ok(r) => match r.bytes().await {
                             Ok(b) => b,
                             Err(e) => {
