@@ -1332,11 +1332,19 @@ function AndroidFFIServer:request(request)
                 end
                 local urls_json = rapidjson.encode(urls)
                 
-                -- Call FFI to create CBZ
-                addLog(self, "Calling rakuyomi_create_cbz FFI")
+                -- Call FFI to create CBZ (wrapped in pcall for safety)
+                addLog(self, "Calling rakuyomi_create_cbz FFI via pcall")
                 addLog(self, "CBZ path: " .. cbz_path)
-                addLog(self, "URLs JSON length: " .. tostring(#urls_json))
-                local result_ptr = self.lib.rakuyomi_create_cbz(cbz_path, urls_json)
+                addLog(self, "URLs count: " .. tostring(#urls))
+                
+                local ffi_ok, result_ptr = pcall(function()
+                    return self.lib.rakuyomi_create_cbz(cbz_path, urls_json)
+                end)
+                
+                if not ffi_ok then
+                    addLog(self, "FFI call CRASHED: " .. tostring(result_ptr))
+                    return { type = 'ERROR', status = 500, body = rapidjson.encode("CBZ creation failed: " .. tostring(result_ptr)) }
+                end
                 
                 addLog(self, "rakuyomi_create_cbz returned: " .. tostring(result_ptr))
                 
