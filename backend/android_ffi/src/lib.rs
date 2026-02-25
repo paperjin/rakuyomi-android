@@ -346,21 +346,35 @@ pub unsafe extern "C" fn rakuyomi_install_source(source_id: *const c_char) -> c_
             .unwrap_or_default();
         
         // Find the source in available lists
+        eprintln!("Install: Searching for source '{}' in {} source lists", source_id_str, source_lists.len());
+        
         for url_value in source_lists {
             let url = match url_value.as_str() {
                 Some(s) => s,
                 None => continue,
             };
             
+            eprintln!("Install: Checking source list: {}", url);
+            
             let base_url = match reqwest::Url::parse(url) {
                 Ok(u) => u,
                 Err(_) => continue,
             };
             
-            // Fetch the source list
-            let response = match state.http_client.get(url).send().await {
-                Ok(r) => r,
-                Err(_) => continue,
+            // Fetch the source list with timeout
+            let response = match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                state.http_client.get(url).send()
+            ).await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    eprintln!("Install: Failed to fetch {}: {}", url, e);
+                    continue;
+                }
+                Err(_) => {
+                    eprintln!("Install: Timeout fetching {}", url);
+                    continue;
+                }
             };
             
             let json: serde_json::Value = match response.json().await {
@@ -377,13 +391,19 @@ pub unsafe extern "C" fn rakuyomi_install_source(source_id: *const c_char) -> c_
             };
             
             // Find the source
+            eprintln!("Install: Searching through {} sources in list", items.len());
+            
             for item in items {
                 let source_item: SourceListItem = match serde_json::from_value(item) {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
                 
+                eprintln!("Install: Checking source ID: {} (looking for: {})", source_item.id, source_id_str);
+                
                 if source_item.id == source_id_str {
+                    eprintln!("Install: Found source {} with file: {}", source_id_str, source_item.file);
+                    
                     // Build the download URL
                     let aix_url = if source_item.file.starts_with("sources/") {
                         match base_url.join(&source_item.file) {
@@ -397,20 +417,27 @@ pub unsafe extern "C" fn rakuyomi_install_source(source_id: *const c_char) -> c_
                         }
                     };
                     
-                    // Download the .aix file
+                    // Download the .aix file with timeout
                     eprintln!("Downloading source from: {}", aix_url);
                     
-                    let aix_content = match state.http_client.get(aix_url.clone()).send().await {
-                        Ok(r) => match r.bytes().await {
+                    let aix_content = match tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        state.http_client.get(aix_url.clone()).send()
+                    ).await {
+                        Ok(Ok(r)) => match r.bytes().await {
                             Ok(b) => b,
                             Err(e) => {
                                 eprintln!("Failed to read response body: {}", e);
-                                continue;
+                                return -2;
                             }
                         },
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             eprintln!("Failed to download from {}: {}", aix_url, e);
-                            continue;
+                            return -3;
+                        }
+                        Err(_) => {
+                            eprintln!("Timeout downloading from {}", aix_url);
+                            return -4;
                         }
                     };
                     
@@ -432,6 +459,7 @@ pub unsafe extern "C" fn rakuyomi_install_source(source_id: *const c_char) -> c_
             }
         }
         
+        eprintln!("Install: Source '{}' not found in any list", source_id_str);
         -1 // Source not found in any list
     });
     
