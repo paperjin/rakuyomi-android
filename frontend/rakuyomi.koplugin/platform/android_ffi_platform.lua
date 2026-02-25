@@ -632,12 +632,7 @@ function AndroidFFIServer:request(request)
             addLog(self, "Installing source: " .. source_id)
             
             -- Check if this is a built-in source
-            local built_in_sources = {
-                ["en.mangapill"] = true,
-                ["en.weebcentral"] = true
-            }
-            
-            if built_in_sources[source_id] then
+            if source_id == "en.mangapill" or source_id == "en.weebcentral" then
                 -- Built-in sources are already "installed" - just return success
                 addLog(self, "Source is built-in, marking as installed: " .. source_id)
                 local source_info = {
