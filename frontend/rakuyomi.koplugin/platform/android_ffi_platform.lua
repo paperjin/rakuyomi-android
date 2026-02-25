@@ -396,6 +396,95 @@ local function saveLibraryToFile(library)
     return false
 end
 
+-- Download a file via HTTP
+local function downloadFile(url, output_path)
+    logger.info("Downloading file from: " .. url:sub(1, 60))
+    
+    if not http then
+        return nil, "HTTP module not available"
+    end
+    
+    local file = io.open(output_path, "wb")
+    if not file then
+        return nil, "Failed to open file for writing: " .. output_path
+    end
+    
+    local result, status_code = http.request{
+        url = url,
+        sink = ltn12.sink.file(file),
+        timeout = 60  -- 60 second timeout for image download
+    }
+    
+    if result == nil then
+        return nil, "Download failed: " .. tostring(status_code)
+    end
+    
+    if type(status_code) == "number" and status_code == 200 then
+        logger.info("Downloaded successfully to: " .. output_path)
+        return true, nil
+    else
+        return nil, "HTTP error: " .. tostring(status_code)
+    end
+end
+
+-- Create CBZ file from page URLs
+-- Returns: cbz_path or nil, error_message
+local function createCBZFromPages(manga_id, chapter_id, pages, manga_title, chapter_title)
+    if not pages or #pages == 0 then
+        return nil, "No pages to download"
+    end
+    
+    -- Create temp directory for images
+    local temp_dir = "/sdcard/koreader/rakuyomi/temp/" .. manga_id .. "_" .. chapter_id
+    local cbz_dir = "/sdcard/koreader/rakuyomi/chapters"
+    
+    -- Ensure directories exist
+    os.execute("mkdir -p " .. temp_dir)
+    os.execute("mkdir -p " .. cbz_dir)
+    
+    logger.info("Creating CBZ with " .. tostring(#pages) .. " pages in " .. temp_dir)
+    
+    -- Download all pages
+    local downloaded = 0
+    for i, page in ipairs(pages) do
+        local page_filename = string.format("%03d.jpg", i)
+        local page_path = temp_dir .. "/" .. page_filename
+        local page_url = page.url
+        
+        logger.info("Downloading page " .. tostring(i) .. "/" .. tostring(#pages))
+        local ok, err = downloadFile(page_url, page_path)
+        
+        if ok then
+            downloaded = downloaded + 1
+        else
+            logger.warn("Failed to download page " .. tostring(i) .. ": " .. tostring(err))
+        end
+    end
+    
+    if downloaded == 0 then
+        return nil, "Failed to download any pages"
+    end
+    
+    -- Create CBZ file (ZIP format)
+    local cbz_filename = manga_id .. "_" .. chapter_id .. ".cbz"
+    local cbz_path = cbz_dir .. "/" .. cbz_filename
+    
+    -- Use system zip command
+    local zip_cmd = "cd " .. temp_dir .. " && zip -r " .. cbz_path .. " *"
+    logger.info("Running: " .. zip_cmd)
+    local zip_result = os.execute(zip_cmd)
+    
+    -- Clean up temp directory
+    os.execute("rm -rf " .. temp_dir)
+    
+    if zip_result == 0 or zip_result == true then
+        logger.info("Created CBZ: " .. cbz_path)
+        return cbz_path, nil
+    else
+        return nil, "Failed to create CBZ file"
+    end
+end
+
 
 
 function AndroidFFIServer:request(request)
@@ -1265,9 +1354,93 @@ function AndroidFFIServer:request(request)
                 body = parsed
             end
         end
-        addLog(self, "Download job for manga: " .. tostring(body.manga_id) .. " chapter: " .. tostring(body.chapter_id))
-        -- Return a job ID
-        local job_id = "job-" .. tostring(os.time())
+        addLog(self, "Download job for manga: " .. tostring(body.manga_id) .. " chapter: " .. tostring(body.chapter_id) .. " source: " .. tostring(body.source_id))
+        
+        -- Start async download in background
+        local job_id = "job-" .. tostring(os.time()) .. "-" .. tostring(math.random(1000))
+        local manga_id = body.manga_id
+        local chapter_id = body.chapter_id
+        local source_id = body.source_id
+        
+        -- Initialize download status
+        if not _G.download_jobs then
+            _G.download_jobs = {}
+        end
+        _G.download_jobs[job_id] = {
+            status = "PENDING",
+            manga_id = manga_id,
+            chapter_id = chapter_id,
+            source_id = source_id,
+            cbz_path = nil,
+            error = nil
+        }
+        
+        -- Start download in background using coroutine
+        local co = coroutine.create(function()
+            addLog(self, "Starting CBZ download for job " .. job_id)
+            _G.download_jobs[job_id].status = "PENDING"
+            
+            -- Fetch pages from source
+            local pages = nil
+            local manga_title = manga_id
+            local chapter_title = "Chapter"
+            
+            if source_id == "en.mangadex" then
+                -- Fetch pages from MangaDex
+                pages, err = fetchMangaDexPages(chapter_id)
+                if pages then
+                    addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaDex")
+                else
+                    addLog(self, "Failed to fetch MangaDex pages: " .. tostring(err))
+                end
+            elseif source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
+                local pages_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
+                if pages_json ~= nil then
+                    local pages_str = ffi.string(pages_json)
+                    self.lib.rakuyomi_free_string(pages_json)
+                    local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
+                    if ok then
+                        pages = parsed
+                        addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaPill")
+                    end
+                end
+            elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
+                local pages_json = self.lib.rakuyomi_get_weebcentral_pages(manga_id, chapter_id)
+                if pages_json ~= nil then
+                    local pages_str = ffi.string(pages_json)
+                    self.lib.rakuyomi_free_string(pages_json)
+                    local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
+                    if ok then
+                        pages = parsed
+                        addLog(self, "Fetched " .. tostring(#pages) .. " pages from WeebCentral")
+                    end
+                end
+            end
+            
+            -- Create CBZ from pages
+            if pages and #pages > 0 then
+                addLog(self, "Creating CBZ from " .. tostring(#pages) .. " pages")
+                local cbz_path, err = createCBZFromPages(manga_id, chapter_id, pages, manga_title, chapter_title)
+                
+                if cbz_path then
+                    _G.download_jobs[job_id].status = "COMPLETED"
+                    _G.download_jobs[job_id].cbz_path = cbz_path
+                    addLog(self, "CBZ created: " .. cbz_path)
+                else
+                    _G.download_jobs[job_id].status = "FAILED"
+                    _G.download_jobs[job_id].error = err
+                    addLog(self, "CBZ creation failed: " .. tostring(err))
+                end
+            else
+                _G.download_jobs[job_id].status = "FAILED"
+                _G.download_jobs[job_id].error = "No pages found"
+                addLog(self, "No pages to download")
+            end
+        end)
+        
+        -- Resume coroutine to start the download
+        coroutine.resume(co)
+        
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_id) }
         
     elseif path:match("^/jobs/[^/]+$") then
@@ -1275,36 +1448,35 @@ function AndroidFFIServer:request(request)
         local job_id = path:match("^/jobs/([^/]+)$")
         addLog(self, "Job details via FFI: job_id=" .. tostring(job_id))
         
-        -- Check if we have downloaded pages to return
-        local result = {"", {}}
-        local has_pages = false
-        
-        if _G.downloaded_pages then
-            for chapter_id, pages in pairs(_G.downloaded_pages) do
-                if pages and #pages > 0 then
-                    logger.info("Returning downloaded chapter with " .. tostring(#pages) .. " pages")
-                    result = {pages[1].url, {}}  -- Return first page URL
-                    has_pages = true
-                    -- Clear after returning
-                    _G.downloaded_pages[chapter_id] = nil
-                    break
-                end
-            end
-        end
-        
-        -- Return job with type and data (expected by Job.lua poll())
+        -- Check download status
         local job_details
-        if has_pages then
-            job_details = {
-                type = "COMPLETED",
-                data = result
-            }
+        if _G.download_jobs and _G.download_jobs[job_id] then
+            local job = _G.download_jobs[job_id]
+            addLog(self, "Job status: " .. job.status)
+            
+            if job.status == "COMPLETED" then
+                job_details = {
+                    type = "COMPLETED",
+                    data = {job.cbz_path, {}}
+                }
+            elseif job.status == "FAILED" then
+                job_details = {
+                    type = "FAILED",
+                    data = {message = job.error or "Download failed"}
+                }
+            else
+                -- Still PENDING - resume coroutine to check progress
+                job_details = {
+                    type = "PENDING",
+                    data = {}
+                }
+            end
         else
+            -- Job not found - return FAILED
+            addLog(self, "Job not found: " .. tostring(job_id))
             job_details = {
                 type = "FAILED",
-                data = {
-                    message = "Chapter download not implemented - need to create CBZ file from page URLs"
-                }
+                data = {message = "Job not found"}
             }
         end
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_details) }
