@@ -2,10 +2,10 @@
 
 local logger = require("logger")
 local rapidjson = require("rapidjson")
-
--- HTTP modules
 local ltn12 = require("ltn12")
 local http = require("socket.http")
+
+logger.info("android_ffi_platform.lua loading...")
 
 -- HTTP GET helper
 local function http_get(url, timeout)
@@ -58,20 +58,22 @@ end
 local AndroidFFIServer = {}
 
 function AndroidFFIServer:init()
-    logger.info("Rakuyomi FFI initialized")
+    logger.info("AndroidFFIServer:init() called")
     return true
 end
 
 function AndroidFFIServer:startServer()
-    logger.info("Rakuyomi FFI server ready")
+    logger.info("AndroidFFIServer:startServer() called")
     return true
 end
 
 function AndroidFFIServer:requestJson(path, method, body)
-    logger.info("REQUEST: " .. tostring(method) .. " " .. tostring(path))
+    logger.info("AndroidFFIServer:requestJson() " .. tostring(path))
+    
+    if not path then return "{}" end
     
     -- Search manga
-    if path and path:match("^/mangas%?q=") then
+    if path:match("^/mangas%?q=") then
         local query = path:match("q=([^&]+)") or ""
         query = query:gsub("+", " ")
         
@@ -102,7 +104,7 @@ function AndroidFFIServer:requestJson(path, method, body)
     end
     
     -- Get chapters
-    if path and path:match("^/mangas/[^/]+/[^/]+/chapters$") then
+    if path:match("^/mangas/[^/]+/[^/]+/chapters$") then
         local manga_id = path:match("^/mangas/[^/]+/([^/]+)/chapters")
         local chapters = {}
         
@@ -129,9 +131,9 @@ function AndroidFFIServer:requestJson(path, method, body)
         return rapidjson.encode(chapters)
     end
     
-    -- Download chapter - synchronous for now
-    if path and path:match("^/jobs/download%-chapter$") then
-        logger.info("Download chapter requested")
+    -- Download chapter
+    if path:match("^/jobs/download%-chapter$") then
+        logger.info("Download chapter")
         
         local req = {}
         if body then
@@ -145,12 +147,10 @@ function AndroidFFIServer:requestJson(path, method, body)
             return rapidjson.encode({type = "FAILED", data = {message = "No chapter ID"}})
         end
         
-        -- Only support MangaDex for now
         if source_id ~= "en.mangadex" then
             return rapidjson.encode({type = "FAILED", data = {message = "Source not supported: " .. tostring(source_id)}})
         end
         
-        logger.info("Fetching pages for chapter " .. chapter_id)
         local pages, err = fetchMangaDexPages(chapter_id)
         
         if not pages or #pages == 0 then
@@ -160,19 +160,18 @@ function AndroidFFIServer:requestJson(path, method, body)
         
         logger.info("Got " .. tostring(#pages) .. " pages")
         
-        -- For now, just return first page URL (CBZ creation needs zip binary)
         local first_page = pages[1] and pages[1].url
         if first_page then
-            logger.info("Returning first page: " .. first_page:sub(1, 50))
-            -- Return as COMPLETED with the first page URL
+            logger.info("First page: " .. first_page:sub(1, 50))
             return rapidjson.encode({type = "COMPLETED", data = {first_page, {}}})
         end
         
         return rapidjson.encode({type = "FAILED", data = {message = "Couldn't get pages"}})
     end
     
-    -- Default empty response
     return "{}"
 end
+
+logger.info("android_ffi_platform.lua loaded successfully")
 
 return AndroidFFIServer
