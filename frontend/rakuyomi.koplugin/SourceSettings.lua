@@ -197,6 +197,17 @@ function SourceSettings:init()
     renderDefinition(def, vertical_group)
   end
 
+  -- Add placeholder if no settings available
+  if #vertical_group == 0 then
+    table.insert(vertical_group, TextBoxWidget:new {
+      text = _("No settings available for this source."),
+      face = Font:getFace("cfont", 18),
+      color = Blitbuffer.COLOR_LIGHT_GRAY,
+      width = self.item_width,
+      alignment = "center",
+    })
+  end
+
   self.title_bar = TitleBar:new {
     -- TODO add source name here
     title = _("Source settings"),
