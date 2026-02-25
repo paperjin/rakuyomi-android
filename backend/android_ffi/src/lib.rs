@@ -1131,7 +1131,7 @@ pub unsafe extern "C" fn rakuyomi_create_cbz(
     urls_json: *const c_char,
 ) -> *mut c_char {
     // SAFETY: This function is called from C/Lua and must never panic
-    // All operations use safe wrapping to avoid panics
+    // Synchronous version - no threads, no async
     
     let output_dir_str = match c_str_to_string(output_dir) {
         Some(s) => s,
@@ -1148,48 +1148,28 @@ pub unsafe extern "C" fn rakuyomi_create_cbz(
         Err(e) => return string_to_c_str(format!(r#"{{"success":false,"error":"Invalid JSON: {}"}}"#, e)),
     };
 
-    // Use blocking task instead of async - simpler and safer for FFI
-    let urls_for_thread = urls.clone();
-    let output_dir_for_thread = output_dir_str.clone();
-    
-    match std::thread::spawn(move || {
-        download_pages_blocking(&output_dir_for_thread, &urls_for_thread)
-    }).join() {
-        Ok(result) => {
-            match result {
-                Ok(count) => {
-                    let result_json = serde_json::json!({
-                        "success": count > 0,
-                        "path": format!("{}/001.jpg", output_dir_str),
-                        "folder": output_dir_str,
-                        "images": count
-                    });
-                    string_to_c_str(result_json.to_string())
-                }
-                Err(e) => {
-                    string_to_c_str(format!(r#"{{"success":false,"error":"{}"}}"#, e))
-                }
-            }
+    // Synchronous download
+    match download_pages_sync(&output_dir_str, &urls) {
+        Ok(count) => {
+            let result_json = serde_json::json!({
+                "success": count > 0,
+                "path": format!("{}/001.jpg", output_dir_str),
+                "folder": output_dir_str,
+                "images": count
+            });
+            string_to_c_str(result_json.to_string())
         }
-        Err(_) => {
-            string_to_c_str(r#"{"success":false,"error":"Thread panicked"}"#.to_string())
+        Err(e) => {
+            string_to_c_str(format!(r#"{{"success":false,"error":"{}"}}"#, e))
         }
     }
 }
 
-/// Blocking download function - runs in thread
-fn download_pages_blocking(output_dir: &str, urls: &[String]) -> Result<usize, String> {
-    use std::io::Write;
-    
+/// Synchronous download function using reqwest (non-blocking client for sync)
+fn download_pages_sync(output_dir: &str, urls: &[String]) -> Result<usize, String> {
     // Create output directory
     std::fs::create_dir_all(output_dir)
         .map_err(|e| format!("Failed to create directory: {}", e))?;
-    
-    // Use blocking reqwest client
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     
     let mut downloaded = 0;
     
@@ -1203,22 +1183,14 @@ fn download_pages_blocking(output_dir: &str, urls: &[String]) -> Result<usize, S
             continue;
         }
         
-        match client.get(url).send() {
-            Ok(response) => {
-                if response.status().is_success() {
-                    match response.bytes() {
-                        Ok(bytes) => {
-                            if let Ok(mut file) = std::fs::File::create(&filepath) {
-                                if file.write_all(&bytes).is_ok() {
-                                    downloaded += 1;
-                                }
-                            }
-                        }
-                        Err(_) => {}
-                    }
-                }
+        // Use curl via system command
+        match std::process::Command::new("curl")
+            .args(&["-sL", "-o", &filepath, "-m", "30", url])
+            .status() {
+            Ok(status) if status.success() => {
+                downloaded += 1;
             }
-            Err(_) => {}
+            _ => {}
         }
     }
     
