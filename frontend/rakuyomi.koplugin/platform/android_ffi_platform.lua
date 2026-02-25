@@ -1293,11 +1293,20 @@ function AndroidFFIServer:request(request)
         end
         
         -- Return job with type and data (expected by Job.lua poll())
-        local job_details = {
-            type = has_pages and "COMPLETED" or "FAILED",
-            data = has_pages and result or {error = "Chapter not downloaded"},
-            error = not has_pages and "Chapter download not implemented - need to create CBZ file"
-        }
+        local job_details
+        if has_pages then
+            job_details = {
+                type = "COMPLETED",
+                data = result
+            }
+        else
+            job_details = {
+                type = "FAILED",
+                data = {
+                    message = "Chapter download not implemented - need to create CBZ file from page URLs"
+                }
+            }
+        end
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_details) }
         
     elseif path:match("^/jobs") then
