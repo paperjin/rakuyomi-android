@@ -57,6 +57,13 @@ end
 -- Create the FFI server object
 local AndroidFFIServer = {}
 
+function AndroidFFIServer:new()
+    local obj = {}
+    setmetatable(obj, self)
+    self.__index = self
+    return obj
+end
+
 function AndroidFFIServer:init()
     logger.info("AndroidFFIServer:init() called")
     return true
