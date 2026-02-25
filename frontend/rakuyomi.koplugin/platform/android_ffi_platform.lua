@@ -58,6 +58,26 @@ local function http_get(url, timeout)
     return nil
 end
 
+-- Search using FFI - returns {results, errors} format
+local function ffi_search(lib, query, source)
+    logger.info("FFI search: query=" .. query .. " source=" .. source)
+    local func = lib.rakuyomi_search
+    if not func then
+        logger.warn("rakuyomi_search not found in library")
+        return nil
+    end
+    -- Call FFI: rakuyomi_search(source_id, query)
+    local ptr = func(source, query)
+    if ptr == nil then
+        logger.warn("rakuyomi_search returned nil")
+        return nil
+    end
+    local str = ffi.string(ptr)
+    lib.rakuyomi_free_string(ptr)
+    logger.info("FFI search result: " .. str:sub(1, 200))
+    return str
+end
+
 -- Fetch pages from MangaDex (fallback)
 local function fetchMangaDexPages(chapter_id)
     local url = "https://api.mangadex.org/at-home/server/" .. chapter_id
@@ -175,9 +195,19 @@ function AndroidFFIServer:request(req)
         
         if lib then
             -- FFI search - default to mangadex
-            local result = ffi_get_string("rakuyomi_search", lib, query, "en.mangadex", 0)
+            local result = ffi_search(lib, query, "en.mangadex")
             if result then
-                return { type = 'SUCCESS', status = 200, body = result }
+                -- Parse and wrap in [results, errors] format
+                local ok, data = pcall(function() return rapidjson.decode(result) end)
+                if ok then
+                    if type(data) == "table" and data.error then
+                        -- Error response
+                        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({{}, {data.error}}) }
+                    else
+                        -- Success - wrap in [results, errors] format
+                        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({data, {}}) }
+                    end
+                end
             end
         end
         
