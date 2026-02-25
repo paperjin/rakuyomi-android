@@ -629,24 +629,45 @@ function AndroidFFIServer:request(request)
         addLog(self, "Installing source via FFI: " .. path)
         local source_id = path:match("/available%-sources/(.+)/install")
         if source_id then
-            addLog(self, "Calling rakuyomi_install_source for: " .. source_id)
+            addLog(self, "Installing source: " .. source_id)
             
-            -- Call the Rust FFI function to install the source
-            local install_result = self.lib.rakuyomi_install_source(source_id)
+            -- Check if this is a built-in source
+            local built_in_sources = {
+                ["en.mangapill"] = true,
+                ["en.weebcentral"] = true
+            }
             
-            if install_result == 0 then
-                addLog(self, "Source installed successfully: " .. source_id)
+            if built_in_sources[source_id] then
+                -- Built-in sources are already "installed" - just return success
+                addLog(self, "Source is built-in, marking as installed: " .. source_id)
                 local source_info = {
                     id = source_id,
-                    name = source_id:gsub("^%l", string.upper),
-                    version = 1,
+                    name = source_id == "en.mangapill" and "MangaPill" or "WeebCentral",
+                    lang = "en",
                     installed = true,
-                    source_of_source = ""
+                    source_of_source = "built-in",
+                    version = 1
                 }
                 return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
             else
-                addLog(self, "Failed to install source: " .. source_id .. " (error code: " .. tostring(install_result) .. ")")
-                return { type = 'ERROR', status = 500, message = "Failed to install source", body = '{"error": "Install failed with code ' .. tostring(install_result) .. '"}' }
+                -- External source - try to install via FFI
+                addLog(self, "Calling rakuyomi_install_source for external source: " .. source_id)
+                local install_result = self.lib.rakuyomi_install_source(source_id)
+                
+                if install_result == 0 then
+                    addLog(self, "Source installed successfully: " .. source_id)
+                    local source_info = {
+                        id = source_id,
+                        name = source_id:gsub("^%l", string.upper),
+                        version = 1,
+                        installed = true,
+                        source_of_source = ""
+                    }
+                    return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
+                else
+                    addLog(self, "Failed to install source: " .. source_id .. " (error code: " .. tostring(install_result) .. ")")
+                    return { type = 'ERROR', status = 500, message = "Failed to install source", body = '{"error": "Install failed with code ' .. tostring(install_result) .. '"}' }
+                end
             end
         else
             return { type = 'ERROR', status = 400, message = "Invalid source ID", body = '{"error": "Invalid source ID"}' }
