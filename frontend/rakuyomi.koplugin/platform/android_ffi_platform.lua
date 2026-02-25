@@ -124,16 +124,32 @@ function AndroidFFIServer:requestJson(path, method, body)
                 if ok and data and data.data then
                     for _, item in ipairs(data.data) do
                         local attr = item.attributes or {}
+                        local chapter_num = tonumber(attr.chapter) or 0
+                        local volume_num = tonumber(attr.volume) or 0
+                        
                         table.insert(chapters, {
                             id = item.id,
                             manga_id = manga_id,
-                            title = attr.title or "Chapter " .. tostring(attr.chapter),
-                            chapter_num = tonumber(attr.chapter) or 0,
                             source_id = "en.mangadex",
-                            read = false
+                            title = attr.title or "",
+                            chapter_num = chapter_num,
+                            volume_num = volume_num,
+                            lang = "en",
+                            -- Optional fields with defaults
+                            scanlator = attr.scanlator or "",
+                            externalUrl = attr.externalUrl or nil,
+                            created_at = attr.publishAt or "",
+                            updated_at = attr.updatedAt or "",
+                            read = false,
+                            downloaded = false,
+                            bookmarked = false
                         })
                     end
+                    -- Sort by chapter number descending
                     table.sort(chapters, function(a, b) return (a.chapter_num or 0) > (b.chapter_num or 0) end)
+                    
+                    -- Return as {chapters, 0} to match expected format
+                    return rapidjson.encode({chapters, 0})
                 end
             else
                 logger.warn("Failed to fetch chapters: " .. tostring(feed_err))
@@ -141,7 +157,7 @@ function AndroidFFIServer:requestJson(path, method, body)
         else
             logger.warn("Could not extract manga_id from path: " .. tostring(path))
         end
-        return rapidjson.encode(chapters)
+        return rapidjson.encode({{}, 0})
     end
     
     -- Download chapter
