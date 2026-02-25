@@ -1130,105 +1130,99 @@ pub unsafe extern "C" fn rakuyomi_create_cbz(
     output_dir: *const c_char,
     urls_json: *const c_char,
 ) -> *mut c_char {
-    // Wrap everything in catch_unwind to prevent crashes
-    match std::panic::catch_unwind(|| {
-        rakuyomi_create_cbz_inner(output_dir, urls_json)
-    }) {
-        Ok(result) => result,
-        Err(e) => {
-            let error_msg = if let Some(s) = e.downcast_ref::<String>() {
-                s.clone()
-            } else if let Some(s) = e.downcast_ref::<&str>() {
-                s.to_string()
-            } else {
-                "Unknown panic in FFI".to_string()
-            };
-            string_to_c_str(format!(r#"{{"success":false,"error":"Panic: {}"}}"#, error_msg))
+    // SAFETY: This function is called from C/Lua and must never panic
+    // All operations use safe wrapping to avoid panics
+    
+    let output_dir_str = match c_str_to_string(output_dir) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"{"success":false,"error":"Invalid output directory"}"#.to_string()),
+    };
+
+    let urls_str = match c_str_to_string(urls_json) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"{"success":false,"error":"Invalid URLs"}"#.to_string()),
+    };
+
+    let urls: Vec<String> = match serde_json::from_str(&urls_str) {
+        Ok(u) => u,
+        Err(e) => return string_to_c_str(format!(r#"{{"success":false,"error":"Invalid JSON: {}"}}"#, e)),
+    };
+
+    // Use blocking task instead of async - simpler and safer for FFI
+    let urls_for_thread = urls.clone();
+    let output_dir_for_thread = output_dir_str.clone();
+    
+    match std::thread::spawn(move || {
+        download_pages_blocking(&output_dir_for_thread, &urls_for_thread)
+    }).join() {
+        Ok(result) => {
+            match result {
+                Ok(count) => {
+                    let result_json = serde_json::json!({
+                        "success": count > 0,
+                        "path": format!("{}/001.jpg", output_dir_str),
+                        "folder": output_dir_str,
+                        "images": count
+                    });
+                    string_to_c_str(result_json.to_string())
+                }
+                Err(e) => {
+                    string_to_c_str(format!(r#"{{"success":false,"error":"{}"}}"#, e))
+                }
+            }
+        }
+        Err(_) => {
+            string_to_c_str(r#"{"success":false,"error":"Thread panicked"}"#.to_string())
         }
     }
 }
 
-fn rakuyomi_create_cbz_inner(
-    output_dir: *const c_char,
-    urls_json: *const c_char,
-) -> *mut c_char {
-    let output_dir_str = unsafe { match c_str_to_string(output_dir) {
-        Some(s) => s,
-        None => return string_to_c_str(r#"{"success":false,"error":"Invalid output directory"}"#.to_string()),
-    }};
-
-    let urls_str = unsafe { match c_str_to_string(urls_json) {
-        Some(s) => s,
-        None => return string_to_c_str(r#"{"success":false,"error":"Invalid URLs"}"#.to_string()),
-    }};
-
-    let urls: Vec<String> = match serde_json::from_str(&urls_str) {
-        Ok(u) => u,
-        Err(_) => return string_to_c_str(r#"{"success":false,"error":"Invalid JSON"}"#.to_string()),
-    };
-
-    let runtime = unsafe { get_runtime() };
-
-    let result = runtime.block_on(async {
-        // Create output directory
-        if let Err(e) = tokio::fs::create_dir_all(&output_dir_str).await {
-            return serde_json::to_string(&serde_json::json!({
-                "success": false,
-                "error": format!("Failed to create directory: {}", e)
-            })).unwrap();
+/// Blocking download function - runs in thread
+fn download_pages_blocking(output_dir: &str, urls: &[String]) -> Result<usize, String> {
+    use std::io::Write;
+    
+    // Create output directory
+    std::fs::create_dir_all(output_dir)
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
+    
+    // Use blocking reqwest client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    
+    let mut downloaded = 0;
+    
+    for (i, url) in urls.iter().enumerate() {
+        let filename = format!("{:03}.jpg", i + 1);
+        let filepath = format!("{}/{}", output_dir, filename);
+        
+        // Check if already exists
+        if std::path::Path::new(&filepath).exists() {
+            downloaded += 1;
+            continue;
         }
-
-        // Download all images
-        let client = match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build() {
-            Ok(c) => c,
-            Err(e) => return serde_json::to_string(&serde_json::json!({
-                "success": false,
-                "error": format!("Failed to create HTTP client: {}", e)
-            })).unwrap()
-        };
-
-        let mut downloaded = 0;
-        for (i, url) in urls.iter().enumerate() {
-            let filename = format!("{:03}.jpg", i + 1);
-            let filepath = format!("{}/{}", output_dir_str, filename);
-
-            match client.get(url).send().await {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        match response.bytes().await {
-                            Ok(bytes) => {
-                                if tokio::fs::write(&filepath, &bytes).await.is_ok() {
+        
+        match client.get(url).send() {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.bytes() {
+                        Ok(bytes) => {
+                            if let Ok(mut file) = std::fs::File::create(&filepath) {
+                                if file.write_all(&bytes).is_ok() {
                                     downloaded += 1;
                                 }
                             }
-                            Err(_) => {}
                         }
+                        Err(_) => {}
                     }
                 }
-                Err(_) => {}
             }
+            Err(_) => {}
         }
-
-        // Create a simple JSON file with image list
-        let info_path = format!("{}/chapter.json", output_dir_str);
-        let info = serde_json::json!({
-            "images": urls.len(),
-            "downloaded": downloaded,
-            "first_page": format!("{}/001.jpg", output_dir_str)
-        });
-        let _ = tokio::fs::write(&info_path, serde_json::to_string(&info).unwrap()).await;
-
-        serde_json::to_string(&serde_json::json!({
-            "success": downloaded > 0,
-            "path": format!("{}/001.jpg", output_dir_str),
-            "folder": output_dir_str,
-            "images": downloaded
-        })).unwrap()
-    });
-
-    string_to_c_str(result)
+    }
+    
+    Ok(downloaded)
 }
 
 
