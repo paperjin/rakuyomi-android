@@ -1275,14 +1275,16 @@ function AndroidFFIServer:request(request)
         local job_id = path:match("^/jobs/([^/]+)$")
         addLog(self, "Job details via FFI: job_id=" .. tostring(job_id))
         
-        -- Return empty job result
+        -- Check if we have downloaded pages to return
         local result = {"", {}}
+        local has_pages = false
         
         if _G.downloaded_pages then
             for chapter_id, pages in pairs(_G.downloaded_pages) do
                 if pages and #pages > 0 then
                     logger.info("Returning downloaded chapter with " .. tostring(#pages) .. " pages")
                     result = {pages[1].url, {}}  -- Return first page URL
+                    has_pages = true
                     -- Clear after returning
                     _G.downloaded_pages[chapter_id] = nil
                     break
@@ -1292,8 +1294,9 @@ function AndroidFFIServer:request(request)
         
         -- Return job with type and data (expected by Job.lua poll())
         local job_details = {
-            type = "COMPLETED",
-            data = result
+            type = has_pages and "COMPLETED" or "FAILED",
+            data = has_pages and result or {error = "Chapter not downloaded"},
+            error = not has_pages and "Chapter download not implemented - need to create CBZ file"
         }
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_details) }
         
