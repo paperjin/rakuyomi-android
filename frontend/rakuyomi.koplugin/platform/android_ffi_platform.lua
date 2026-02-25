@@ -1226,6 +1226,9 @@ function AndroidFFIServer:request(request)
             addLog(self, "Search query from path: " .. query)
         end
         -- Call MangaDex API for real search
+        local all_results = {}
+        local errors = {}
+        
         if query and query ~= "" then
             addLog(self, "Searching MangaDex...")
             local md_data, err = searchMangaDex(query)
@@ -1233,13 +1236,46 @@ function AndroidFFIServer:request(request)
             if md_data then
                 local results = convertMangaDexToRakuyomi(md_data)
                 addLog(self, "Found " .. tostring(#results) .. " manga from MangaDex")
-                -- Return format: [[results], [errors]]
-                local response_body = {results, {}}
-                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+                for _, r in ipairs(results) do table.insert(all_results, r) end
             else
                 addLog(self, "MangaDex search failed: " .. tostring(err))
-                -- Fall back to mock results on error
+                table.insert(errors, {source = "MangaDex", error = tostring(err)})
             end
+            
+            -- Also search MangaPill if available
+            if self.lib.rakuyomi_search_mangapill then
+                addLog(self, "Searching MangaPill...")
+                local mp_json = self.lib.rakuyomi_search_mangapill(query, 1)
+                if mp_json ~= nil then
+                    local mp_str = ffi.string(mp_json)
+                    self.lib.rakuyomi_free_string(mp_json)
+                    local mp_results = rapidjson.decode(mp_str)
+                    if mp_results and #mp_results > 0 then
+                        addLog(self, "Found " .. tostring(#mp_results) .. " manga from MangaPill")
+                        for _, r in ipairs(mp_results) do table.insert(all_results, r) end
+                    end
+                end
+            end
+            
+            -- Also search WeebCentral if available  
+            if self.lib.rakuyomi_search_weebcentral then
+                addLog(self, "Searching WeebCentral...")
+                local wc_json = self.lib.rakuyomi_search_weebcentral(query, 1)
+                if wc_json ~= nil then
+                    local wc_str = ffi.string(wc_json)
+                    self.lib.rakuyomi_free_string(wc_json)
+                    local wc_results = rapidjson.decode(wc_str)
+                    if wc_results and #wc_results > 0 then
+                        addLog(self, "Found " .. tostring(#wc_results) .. " manga from WeebCentral")
+                        for _, r in ipairs(wc_results) do table.insert(all_results, r) end
+                    end
+                end
+            end
+            
+            -- Return combined results
+            addLog(self, "Total results from all sources: " .. tostring(#all_results))
+            local response_body = {all_results, errors}
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
         end
         -- Fallback mock search results
         addLog(self, "Returning mock search results")
