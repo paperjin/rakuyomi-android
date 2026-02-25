@@ -16,6 +16,9 @@ ffi.cdef[[
     char* rakuyomi_get_sources(void);
     char* rakuyomi_get_source_lists(void);
     int rakuyomi_install_source(const char* source_id);
+    char* rakuyomi_get_source_setting_definitions(const char* source_id);
+    char* rakuyomi_get_source_stored_settings(const char* source_id);
+    int rakuyomi_set_source_stored_settings(const char* source_id, const char* settings_json);
     char* rakuyomi_get_settings(void);
     int rakuyomi_set_settings(const char* settings);
     char* rakuyomi_search(const char* query, const char* source, int page);
@@ -123,21 +126,33 @@ function AndroidFFIServer:request(req)
     -- Available sources
     if path == "/available-sources" then
         if lib then
+            logger.info("Calling rakuyomi_get_sources...")
             local result = ffi_get_string("rakuyomi_get_sources", lib)
             if result then
+                logger.info("Got sources: " .. result:sub(1, 100))
                 return { type = 'SUCCESS', status = 200, body = result }
+            else
+                logger.warn("rakuyomi_get_sources returned nil")
             end
+        else
+            logger.warn("Library not loaded for /available-sources")
         end
-        return { type = 'SUCCESS', status = 200, body = '[]' }
+        return { type = 'SUCCESS', status = 200, body = '{"sources":[]}' }
     end
     
     -- Installed sources
     if path == "/installed-sources" then
         if lib then
+            logger.info("Calling rakuyomi_get_source_lists...")
             local result = ffi_get_string("rakuyomi_get_source_lists", lib)
             if result then
+                logger.info("Got source lists: " .. result:sub(1, 100))
                 return { type = 'SUCCESS', status = 200, body = result }
+            else
+                logger.warn("rakuyomi_get_source_lists returned nil")
             end
+        else
+            logger.warn("Library not loaded for /installed-sources")
         end
         return { type = 'SUCCESS', status = 200, body = '[]' }
     end
