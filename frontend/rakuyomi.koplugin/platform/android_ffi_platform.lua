@@ -269,7 +269,7 @@ ffi.cdef[[
     char* rakuyomi_get_library(void);
     char* rakuyomi_get_settings(void);
     int rakuyomi_set_settings(const char* settings_json);
-    char* rakuyomi_create_cbz(const char* cbz_path, const char* urls_json);
+    char* rakuyomi_download_pages(const char* output_dir, const char* urls_json);
     void rakuyomi_free_string(char* s);
 ]]
 
