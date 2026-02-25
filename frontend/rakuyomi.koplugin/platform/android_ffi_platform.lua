@@ -647,6 +647,16 @@ function AndroidFFIServer:request(request)
             else
                 -- External source - try to install via FFI
                 addLog(self, "Calling rakuyomi_install_source for external source: " .. source_id)
+                
+                -- Check if we have source lists configured
+                local settings = getCachedSettingsOrDefault()
+                local has_source_lists = settings.source_lists and #settings.source_lists > 0
+                
+                if not has_source_lists then
+                    addLog(self, "No source lists configured, cannot install external source: " .. source_id)
+                    return { type = 'ERROR', status = 400, message = "No source lists configured. Add a source list URL in settings first.", body = '{"error": "No source lists configured"}' }
+                end
+                
                 local install_result = self.lib.rakuyomi_install_source(source_id)
                 
                 if install_result == 0 then
@@ -661,7 +671,8 @@ function AndroidFFIServer:request(request)
                     return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
                 else
                     addLog(self, "Failed to install source: " .. source_id .. " (error code: " .. tostring(install_result) .. ")")
-                    return { type = 'ERROR', status = 500, message = "Failed to install source", body = '{"error": "Install failed with code ' .. tostring(install_result) .. '"}' }
+                    -- Return error immediately so UI doesn't hang
+                    return { type = 'ERROR', status = 500, message = "Source not found in any configured source list", body = '{"error": "Source not found", "code": ' .. tostring(install_result) .. '}' }
                 end
             end
         else
