@@ -615,25 +615,9 @@ function AndroidFFIServer:request(request)
                 }
                 return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
             else
-                -- External source - try to install via FFI
-                addLog(self, "Calling rakuyomi_install_source for external source: " .. source_id)
-                local install_result = self.lib.rakuyomi_install_source(source_id)
-                
-                if install_result == 0 then
-                    addLog(self, "Source installed successfully: " .. source_id)
-                    local source_info = {
-                        id = source_id,
-                        name = source_id:gsub("^%l", string.upper),
-                        version = 1,
-                        installed = true,
-                        source_of_source = ""
-                    }
-                    return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
-                else
-                    addLog(self, "Failed to install source: " .. source_id .. " (error code: " .. tostring(install_result) .. ")")
-                    -- Return error immediately with code
-                    return { type = 'ERROR', status = 500, message = "Source not found in configured lists (code: " .. tostring(install_result) .. ")", body = '{"error": "Source not found", "code": ' .. tostring(install_result) .. '}' }
-                end
+                -- External source - not yet implemented (FFI call hangs)
+                addLog(self, "External source installation not implemented: " .. source_id)
+                return { type = 'ERROR', status = 501, message = "External source installation not yet implemented. Use built-in sources (MangaPill, WeebCentral).", body = '{"error": "Not implemented"}' }
             end
         else
             return { type = 'ERROR', status = 400, message = "Invalid source ID", body = '{"error": "Invalid source ID"}' }
