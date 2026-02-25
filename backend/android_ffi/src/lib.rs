@@ -731,6 +731,115 @@ pub extern "C" fn rakuyomi_set_settings(settings_json: *const c_char) -> c_int {
     }
 }
 
+/// Source settings storage helpers
+/// Returns the path to a source's stored settings file
+fn get_source_settings_path(source_id: &str) -> Option<PathBuf> {
+    get_state().map(|state| {
+        state.config_dir.join("sources").join(format!("{}.settings.json", source_id))
+    })
+}
+
+/// Get setting definitions for a source
+/// Returns JSON array of setting definitions (caller must free with rakuyomi_free_string)
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_get_source_setting_definitions(source_id: *const c_char) -> *mut c_char {
+    let _source_id = match c_str_to_string(source_id) {
+        Some(s) => s,
+        None => return string_to_c_str("[]".to_string()),
+    };
+
+    // For now, return empty array - sources can add definitions later
+    // This prevents the crash when SourceSettings tries to iterate over nil
+    let empty_definitions: Vec<serde_json::Value> = vec![];
+    string_to_c_str(serde_json::to_string(&empty_definitions).unwrap_or_else(|_| "[]".to_string()))
+}
+
+/// Get stored settings for a source
+/// Returns JSON object with stored settings (caller must free with rakuyomi_free_string)
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_get_source_stored_settings(source_id: *const c_char) -> *mut c_char {
+    let source_id_str = match c_str_to_string(source_id) {
+        Some(s) => s,
+        None => return string_to_c_str("{}".to_string()),
+    };
+
+    let runtime = get_runtime();
+
+    let result = runtime.block_on(async {
+        if let Some(settings_path) = get_source_settings_path(&source_id_str) {
+            if settings_path.exists() {
+                match tokio::fs::read_to_string(&settings_path).await {
+                    Ok(content) => {
+                        // Validate it's valid JSON
+                        match serde_json::from_str::<serde_json::Value>(&content) {
+                            Ok(_) => content,
+                            Err(_) => "{}".to_string(),
+                        }
+                    }
+                    Err(_) => "{}".to_string(),
+                }
+            } else {
+                "{}".to_string()
+            }
+        } else {
+            "{}".to_string()
+        }
+    });
+
+    string_to_c_str(result)
+}
+
+/// Set stored settings for a source
+/// Returns 0 on success, -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_set_source_stored_settings(
+    source_id: *const c_char,
+    settings_json: *const c_char,
+) -> c_int {
+    let source_id_str = match c_str_to_string(source_id) {
+        Some(s) => s,
+        None => return -1,
+    };
+
+    let settings_str = match c_str_to_string(settings_json) {
+        Some(s) => s,
+        None => return -1,
+    };
+
+    let runtime = get_runtime();
+
+    runtime.block_on(async {
+        // Validate JSON
+        match serde_json::from_str::<serde_json::Value>(&settings_str) {
+            Ok(_) => {
+                if let Some(settings_path) = get_source_settings_path(&source_id_str) {
+                    // Ensure parent directory exists
+                    if let Some(parent) = settings_path.parent() {
+                        let _ = tokio::fs::create_dir_all(parent).await;
+                    }
+
+                    match tokio::fs::write(&settings_path, settings_str).await {
+                        Ok(_) => {
+                            eprintln!("Source settings saved to {:?}", settings_path);
+                            0 // Success
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save source settings: {}", e);
+                            -2 // File write error
+                        }
+                    }
+                } else {
+                    -3 // State not initialized
+                }
+            }
+            Err(e) => {
+                eprintln!("Invalid JSON in source settings: {}", e);
+                -4 // Invalid JSON
+            }
+        }
+    })
+}
+
 /// Free a string returned by other rakuyomi functions
 #[no_mangle]
 pub unsafe extern "C" fn rakuyomi_free_string(s: *mut c_char) {

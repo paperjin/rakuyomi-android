@@ -229,6 +229,9 @@ ffi.cdef[[
     char* rakuyomi_get_sources(void);
     int rakuyomi_install_source(const char* source_id);
     char* rakuyomi_get_source_lists(void);
+    char* rakuyomi_get_source_setting_definitions(const char* source_id);
+    char* rakuyomi_get_source_stored_settings(const char* source_id);
+    int rakuyomi_set_source_stored_settings(const char* source_id, const char* settings_json);
     char* rakuyomi_search(const char* source_id, const char* query);
     char* rakuyomi_get_manga(const char* source_id, const char* manga_id);
     char* rakuyomi_get_chapters(const char* source_id, const char* manga_id);
@@ -1247,6 +1250,54 @@ function AndroidFFIServer:request(request)
     elseif path:match("^/jobs") then
         addLog(self, "Job operation via FFI")
         return { type = 'SUCCESS', status = 200, body = '[]' }
+        
+    elseif path:match("^/installed%-sources/[^/]+/setting%-definitions$") then
+        -- Get setting definitions for a source
+        local source_id = path:match("^/installed%-sources/([^/]+)/setting%-definitions$")
+        addLog(self, "Fetching source setting definitions via FFI for: " .. tostring(source_id))
+        
+        if self.lib.rakuyomi_get_source_setting_definitions then
+            result_json = self.lib.rakuyomi_get_source_setting_definitions(source_id)
+            if result_json == nil then
+                error_msg = "Failed to get source setting definitions"
+            end
+        else
+            error_msg = "Source setting definitions not implemented in FFI"
+        end
+        
+    elseif path:match("^/installed%-sources/[^/]+/stored%-settings$") then
+        local source_id = path:match("^/installed%-sources/([^/]+)/stored%-settings$")
+        
+        if method == "GET" then
+            addLog(self, "Fetching source stored settings via FFI for: " .. tostring(source_id))
+            
+            if self.lib.rakuyomi_get_source_stored_settings then
+                result_json = self.lib.rakuyomi_get_source_stored_settings(source_id)
+                if result_json == nil then
+                    error_msg = "Failed to get source stored settings"
+                end
+            else
+                error_msg = "Source stored settings getter not implemented in FFI"
+            end
+            
+        elseif method == "POST" or method == "PUT" then
+            addLog(self, "Setting source stored settings via FFI for: " .. tostring(source_id))
+            
+            if self.lib.rakuyomi_set_source_stored_settings then
+                local body_str = request.body or "{}"
+                local result = self.lib.rakuyomi_set_source_stored_settings(source_id, body_str)
+                if result == 0 then
+                    -- Return the saved settings
+                    result_json = self.lib.rakuyomi_get_source_stored_settings(source_id)
+                else
+                    error_msg = "Failed to set source stored settings (error: " .. tostring(result) .. ")"
+                end
+            else
+                error_msg = "Source stored settings setter not implemented in FFI"
+            end
+        else
+            error_msg = "Unsupported method for /stored-settings: " .. tostring(method)
+        end
         
     elseif path == "/settings" then
         if method == "GET" then
