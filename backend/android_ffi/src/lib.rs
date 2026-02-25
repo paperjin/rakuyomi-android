@@ -1119,6 +1119,8 @@ pub unsafe extern "C" fn rakuyomi_get_weebcentral_pages(
     string_to_c_str(result)
 }
 
-mod downloader;
+mod cbz;
+
+pub use cbz::create_cbz;
 
 
