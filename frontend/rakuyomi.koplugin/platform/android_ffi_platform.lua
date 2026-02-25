@@ -1356,92 +1356,87 @@ function AndroidFFIServer:request(request)
         end
         addLog(self, "Download job for manga: " .. tostring(body.manga_id) .. " chapter: " .. tostring(body.chapter_id) .. " source: " .. tostring(body.source_id))
         
-        -- Start async download in background
-        local job_id = "job-" .. tostring(os.time()) .. "-" .. tostring(math.random(1000))
+        -- Synchronous download - do everything now and return result
         local manga_id = body.manga_id
         local chapter_id = body.chapter_id
         local source_id = body.source_id
+        local job_id = "job-" .. tostring(os.time()) .. "-" .. tostring(math.random(1000))
         
         -- Initialize download status
         if not _G.download_jobs then
             _G.download_jobs = {}
         end
-        _G.download_jobs[job_id] = {
-            status = "PENDING",
-            manga_id = manga_id,
-            chapter_id = chapter_id,
-            source_id = source_id,
-            cbz_path = nil,
-            error = nil
-        }
         
-        -- Start download in background using coroutine
-        local co = coroutine.create(function()
-            addLog(self, "Starting CBZ download for job " .. job_id)
-            _G.download_jobs[job_id].status = "PENDING"
-            
-            -- Fetch pages from source
-            local pages = nil
-            local manga_title = manga_id
-            local chapter_title = "Chapter"
-            
-            if source_id == "en.mangadex" then
-                -- Fetch pages from MangaDex
-                pages, err = fetchMangaDexPages(chapter_id)
-                if pages then
-                    addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaDex")
-                else
-                    addLog(self, "Failed to fetch MangaDex pages: " .. tostring(err))
-                end
-            elseif source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
-                local pages_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
-                if pages_json ~= nil then
-                    local pages_str = ffi.string(pages_json)
-                    self.lib.rakuyomi_free_string(pages_json)
-                    local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
-                    if ok then
-                        pages = parsed
-                        addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaPill")
-                    end
-                end
-            elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
-                local pages_json = self.lib.rakuyomi_get_weebcentral_pages(manga_id, chapter_id)
-                if pages_json ~= nil then
-                    local pages_str = ffi.string(pages_json)
-                    self.lib.rakuyomi_free_string(pages_json)
-                    local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
-                    if ok then
-                        pages = parsed
-                        addLog(self, "Fetched " .. tostring(#pages) .. " pages from WeebCentral")
-                    end
-                end
-            end
-            
-            -- Create CBZ from pages
-            if pages and #pages > 0 then
-                addLog(self, "Creating CBZ from " .. tostring(#pages) .. " pages")
-                local cbz_path, err = createCBZFromPages(manga_id, chapter_id, pages, manga_title, chapter_title)
-                
-                if cbz_path then
-                    _G.download_jobs[job_id].status = "COMPLETED"
-                    _G.download_jobs[job_id].cbz_path = cbz_path
-                    addLog(self, "CBZ created: " .. cbz_path)
-                else
-                    _G.download_jobs[job_id].status = "FAILED"
-                    _G.download_jobs[job_id].error = err
-                    addLog(self, "CBZ creation failed: " .. tostring(err))
-                end
+        addLog(self, "Starting synchronous CBZ download for job " .. job_id)
+        
+        -- Fetch pages from source
+        local pages = nil
+        local manga_title = manga_id
+        local chapter_title = "Chapter"
+        
+        if source_id == "en.mangadex" then
+            -- Fetch pages from MangaDex
+            pages, err = fetchMangaDexPages(chapter_id)
+            if pages then
+                addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaDex")
             else
-                _G.download_jobs[job_id].status = "FAILED"
-                _G.download_jobs[job_id].error = "No pages found"
-                addLog(self, "No pages to download")
+                addLog(self, "Failed to fetch MangaDex pages: " .. tostring(err))
             end
-        end)
+        elseif source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_pages then
+            local pages_json = self.lib.rakuyomi_get_mangapill_pages(manga_id, chapter_id)
+            if pages_json ~= nil then
+                local pages_str = ffi.string(pages_json)
+                self.lib.rakuyomi_free_string(pages_json)
+                local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
+                if ok then
+                    pages = parsed
+                    addLog(self, "Fetched " .. tostring(#pages) .. " pages from MangaPill")
+                end
+            end
+        elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_pages then
+            local pages_json = self.lib.rakuyomi_get_weebcentral_pages(manga_id, chapter_id)
+            if pages_json ~= nil then
+                local pages_str = ffi.string(pages_json)
+                self.lib.rakuyomi_free_string(pages_json)
+                local ok, parsed = pcall(function() return rapidjson.decode(pages_str) end)
+                if ok then
+                    pages = parsed
+                    addLog(self, "Fetched " .. tostring(#pages) .. " pages from WeebCentral")
+                end
+            end
+        end
         
-        -- Resume coroutine to start the download
-        coroutine.resume(co)
-        
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_id) }
+        -- Create CBZ from pages
+        if pages and #pages > 0 then
+            addLog(self, "Creating CBZ from " .. tostring(#pages) .. " pages")
+            local cbz_path, err = createCBZFromPages(manga_id, chapter_id, pages, manga_title, chapter_title)
+            
+            if cbz_path then
+                _G.download_jobs[job_id] = {
+                    status = "COMPLETED",
+                    cbz_path = cbz_path,
+                    error = nil
+                }
+                addLog(self, "CBZ created: " .. cbz_path)
+                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_id) }
+            else
+                _G.download_jobs[job_id] = {
+                    status = "FAILED",
+                    cbz_path = nil,
+                    error = err or "CBZ creation failed"
+                }
+                addLog(self, "CBZ creation failed: " .. tostring(err))
+                return { type = 'ERROR', status = 500, message = "Failed to create CBZ: " .. tostring(err), body = '{"error": "CBZ creation failed"}' }
+            end
+        else
+            _G.download_jobs[job_id] = {
+                status = "FAILED",
+                cbz_path = nil,
+                error = "No pages found"
+            }
+            addLog(self, "No pages to download")
+            return { type = 'ERROR', status = 404, message = "No pages found for chapter", body = '{"error": "No pages"}' }
+        end
         
     elseif path:match("^/jobs/[^/]+$") then
         -- GET /jobs/{id} - returns job details
