@@ -488,38 +488,8 @@ function AndroidFFIServer:request(request)
         -- Load library from file
         local library = loadLibraryFromFile()
         
-        if library and #library > 0 then
-            logger.info("Returning " .. tostring(#library) .. " items from library")
-            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(library) }
-        end
-        
-        -- Fallback to mock library if empty
-        logger.info("Library empty, returning defaults")
-        local mock_library = {
-            {
-                id = "mock-manga-1",
-                title = "Chainsaw Man",
-                author = "Tatsuki Fujimoto",
-                description = "Denji has a simple dream—to live a happy and peaceful life...",
-                cover_url = "",
-                status = "ongoing",
-                source = { id = "en.mangadex", name = "MangaDex" },
-                in_library = true,
-                unread_chapters_count = 5,
-            },
-            {
-                id = "mock-manga-2",
-                title = "Spy x Family",
-                author = "Tatsuya Endo",
-                description = "Master spy Twilight is unparalleled...",
-                cover_url = "",
-                status = "ongoing",
-                source = { id = "en.mangadex", name = "MangaDex" },
-                in_library = true,
-                unread_chapters_count = 3,
-            },
-        }
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_library) }
+        logger.info("Returning " .. tostring(#library) .. " items from library")
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(library) }
         
     elseif path == "/count-notifications" then
         addLog(self, "Fetching notification count via FFI")
