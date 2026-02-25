@@ -274,33 +274,66 @@ ffi.cdef[[
 ]]
 
 -- Try to load the shared library
- local function load_rakuyomi_library()
-    -- Possible library locations
-    local search_paths = {
-        -- Internal app storage (Android requirement for namespace)
-        "/data/data/org.koreader.launcher/files/librakuyomi.so",
-        -- In plugin directory
-        Paths.getPluginDirectory() .. "/librakuyomi.so",
-        Paths.getPluginDirectory() .. "/rakuyomi.so",
-        -- In libs subdirectory (common Android pattern)
-        Paths.getPluginDirectory() .. "/libs/librakuyomi.so",
-        -- System library path
-        "rakuyomi",
-        "librakuyomi.so",
-    }
+local function load_rakuyomi_library()
+    -- Internal app storage path (Android requirement)
+    local internal_path = "/data/data/org.koreader.launcher/files/librakuyomi.so"
+    -- Plugin directory path
+    local plugin_path = Paths.getPluginDirectory() .. "/libs/librakuyomi.so"
     
-    for _, path in ipairs(search_paths) do
-        local ok, lib = pcall(function()
-            return ffi.load(path)
+    -- Try to copy from plugin to internal storage if internal doesn't exist
+    local function copy_library()
+        local src_file = io.open(plugin_path, "rb")
+        if src_file then
+            local content = src_file:read("*all")
+            src_file:close()
+            
+            -- Write to internal storage
+            local dst_file = io.open(internal_path, "wb")
+            if dst_file then
+                dst_file:write(content)
+                dst_file:close()
+                logger.info("Copied library from plugin to internal storage")
+                return true
+            end
+        end
+        return false
+    end
+    
+    -- Try to load from internal storage first
+    local ok, lib = pcall(function()
+        return ffi.load(internal_path)
+    end)
+    
+    if ok and lib then
+        logger.info("Loaded rakuyomi library from internal storage")
+        return lib
+    end
+    
+    -- If internal doesn't work, try to copy and reload
+    logger.info("Library not in internal storage, attempting copy...")
+    if copy_library() then
+        -- Try loading again after copy
+        ok, lib = pcall(function()
+            return ffi.load(internal_path)
         end)
         
         if ok and lib then
-            logger.info("Successfully loaded rakuyomi library from: " .. path)
+            logger.info("Loaded rakuyomi library after copy")
             return lib
         end
     end
-
-    return nil, "Could not find librakuyomi.so in any of: " .. table.concat(search_paths, ", ")
+    
+    -- Fallback: try plugin directory directly
+    ok, lib = pcall(function()
+        return ffi.load(plugin_path)
+    end)
+    
+    if ok and lib then
+        logger.info("Loaded rakuyomi library from plugin directory")
+        return lib
+    end
+    
+    return nil, "Could not load librakuyomi.so from internal storage or plugin directory"
 end
 
 ---@class AndroidFFIServer: Server
