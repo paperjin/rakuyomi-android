@@ -956,8 +956,51 @@ function AndroidFFIServer:request(request)
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/chapters$")
         addLog(self, "Fetching chapters via FFI: Source=" .. tostring(source_id) .. " Manga=" .. tostring(manga_id))
         
-        -- Try to fetch real chapters from MangaDex if this is a real manga ID
-        if manga_id and not manga_id:match("^mock-") then
+        -- Route to ported sources first
+        if source_id == "en.mangapill" and self.lib.rakuyomi_get_mangapill_chapters then
+            logger.info("Fetching chapters from MangaPill for: " .. manga_id)
+            local result_json = self.lib.rakuyomi_get_mangapill_chapters(manga_id)
+            if result_json ~= nil then
+                local json_str = ffi.string(result_json)
+                self.lib.rakuyomi_free_string(result_json)
+                local chapters, pos, err = rapidjson.decode(json_str)
+                if not err and chapters then
+                    -- Add manga_id and source_id to each chapter if missing
+                    for _, chapter in ipairs(chapters) do
+                        chapter.manga_id = manga_id
+                        chapter.source_id = source_id
+                        chapter.chapter_num = chapter.chapter_number or chapter.chapter or 0
+                        chapter.scanlator = "mangapill"
+                        chapter.lang = "en"
+                    end
+                    logger.info("Returning " .. tostring(#chapters) .. " chapters from MangaPill")
+                    return { type = 'SUCCESS', status = 200, body = rapidjson.encode(chapters) }
+                end
+            end
+            logger.warn("MangaPill chapters fetch failed, using fallback")
+        elseif source_id == "en.weebcentral" and self.lib.rakuyomi_get_weebcentral_chapters then
+            logger.info("Fetching chapters from WeebCentral for: " .. manga_id)
+            local result_json = self.lib.rakuyomi_get_weebcentral_chapters(manga_id)
+            if result_json ~= nil then
+                local json_str = ffi.string(result_json)
+                self.lib.rakuyomi_free_string(result_json)
+                local chapters, pos, err = rapidjson.decode(json_str)
+                if not err and chapters then
+                    -- Add manga_id and source_id to each chapter if missing
+                    for _, chapter in ipairs(chapters) do
+                        chapter.manga_id = manga_id
+                        chapter.source_id = source_id
+                        chapter.chapter_num = chapter.chapter_number or chapter.chapter or 0
+                        chapter.scanlator = "weebcentral"
+                        chapter.lang = "en"
+                    end
+                    logger.info("Returning " .. tostring(#chapters) .. " chapters from WeebCentral")
+                    return { type = 'SUCCESS', status = 200, body = rapidjson.encode(chapters) }
+                end
+            end
+            logger.warn("WeebCentral chapters fetch failed, using fallback")
+        elseif manga_id and not manga_id:match("^mock-") then
+            -- Try to fetch real chapters from MangaDex if this is a real manga ID
             logger.info("Fetching real chapters from MangaDex for: " .. manga_id)
             local md_data, err = fetchMangaDexChapters(manga_id)
             
