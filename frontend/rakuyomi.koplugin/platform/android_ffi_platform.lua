@@ -1307,10 +1307,33 @@ function AndroidFFIServer:request(request)
         local manga_id = body.manga_id
         local source_id = body.source_id
         
-        if chapter_id and self.lib and self.lib.rakuyomi_create_cbz then
+        addLog(self, "About to check FFI library...")
+        
+        -- SAFE check for FFI function (avoid crash on access)
+        local has_ffi = false
+        local ffi_ok, ffi_check = pcall(function()
+            if not self.lib then return false end
+            if not self.lib.rakuyomi_create_cbz then return false end
+            return true
+        end)
+        
+        if ffi_ok and ffi_check then
+            has_ffi = true
+        else
+            addLog(self, "FFI library check failed: " .. tostring(ffi_check))
+        end
+        
+        addLog(self, "chapter_id=" .. tostring(chapter_id) .. " has_ffi=" .. tostring(has_ffi))
+        
+        if chapter_id and has_ffi then
             -- Fetch pages for this chapter
-            addLog(self, "Fetching pages for CBZ creation")
-            local pages = fetchMangaDexPages(chapter_id)
+            addLog(self, "Fetching pages for CBZ creation via pcall")
+            local fetch_ok, pages = pcall(function() return fetchMangaDexPages(chapter_id) end)
+            
+            if not fetch_ok then
+                addLog(self, "fetchMangaDexPages CRASHED: " .. tostring(pages))
+                return { type = 'ERROR', status = 500, body = rapidjson.encode("Failed to fetch pages: " .. tostring(pages)) }
+            end
             
             addLog(self, "fetchMangaDexPages returned: " .. tostring(pages) .. " type: " .. type(pages))
             if type(pages) == "table" then
