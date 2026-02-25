@@ -1312,6 +1312,11 @@ function AndroidFFIServer:request(request)
             addLog(self, "Fetching pages for CBZ creation")
             local pages = fetchMangaDexPages(chapter_id)
             
+            addLog(self, "fetchMangaDexPages returned: " .. tostring(pages) .. " type: " .. type(pages))
+            if type(pages) == "table" then
+                addLog(self, "Number of pages: " .. tostring(#pages))
+            end
+            
             if pages and #pages > 0 then
                 addLog(self, "Creating CBZ from " .. tostring(#pages) .. " pages")
                 
@@ -1329,7 +1334,11 @@ function AndroidFFIServer:request(request)
                 
                 -- Call FFI to create CBZ
                 addLog(self, "Calling rakuyomi_create_cbz FFI")
+                addLog(self, "CBZ path: " .. cbz_path)
+                addLog(self, "URLs JSON length: " .. tostring(#urls_json))
                 local result_ptr = self.lib.rakuyomi_create_cbz(cbz_path, urls_json)
+                
+                addLog(self, "rakuyomi_create_cbz returned: " .. tostring(result_ptr))
                 
                 if result_ptr then
                     local result_str = ffi.string(result_ptr)
@@ -1347,13 +1356,13 @@ function AndroidFFIServer:request(request)
                         addLog(self, "CBZ failed: " .. (result_data and result_data.error or "unknown"))
                     end
                 else
-                    addLog(self, "rakuyomi_create_cbz returned nil")
+                    addLog(self, "rakuyomi_create_cbz returned nil - FFI may have crashed")
                 end
             else
                 addLog(self, "No pages found for chapter")
             end
         else
-            addLog(self, "Missing chapter_id or rakuyomi_create_cbz not available")
+            addLog(self, "Cannot create CBZ: chapter_id=" .. tostring(chapter_id) .. " has_lib=" .. tostring(self.lib ~= nil) .. " has_create_cbz=" .. tostring(self.lib and self.lib.rakuyomi_create_cbz ~= nil))
         end
         
         -- Return a job ID (will fail on poll if CBZ creation failed)
