@@ -1,5 +1,34 @@
 # Rakuyomi Android Fixes Log
 
+## Date: February 24, 2026
+
+### Summary of Changes Made
+
+#### 7. Source Installation Endpoint (Backend + Frontend)
+**Files Modified:**
+- `backend/android_ffi/src/lib.rs`
+- `frontend/rakuyomi.koplugin/platform/android_ffi_platform.lua`
+
+**Changes:**
+- Added `SourceListItem` and `SourceInfo` structs for parsing source list JSON
+- Added `rakuyomi_get_sources()` - Fetches available sources from all configured source lists
+- Added `rakuyomi_get_source_lists()` - Returns configured source list URLs
+- Added `rakuyomi_install_source()` - Downloads and installs a source .aix file:
+  - Parses settings.json for source_lists
+  - Fetches each source list JSON
+  - Finds the requested source by ID
+  - Downloads the .aix file to sources/ directory
+  - Returns success/failure code
+- Updated Android FFI Lua to call `rakuyomi_install_source()` FFI function
+- **Result:** The "/available-sources/{id}/install" endpoint now works end-to-end
+
+**Usage:**
+1. Add source list URLs to settings.json (e.g., https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json)
+2. Call GET /available-sources to see available sources
+3. Call POST /available-sources/{id}/install to download and install
+
+---
+
 ## Date: February 22, 2026
 
 ### Summary of Changes Made

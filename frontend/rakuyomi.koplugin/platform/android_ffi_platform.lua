@@ -227,6 +227,8 @@ end
 ffi.cdef[[
     int rakuyomi_init(const char* config_path);
     char* rakuyomi_get_sources(void);
+    int rakuyomi_install_source(const char* source_id);
+    char* rakuyomi_get_source_lists(void);
     char* rakuyomi_search(const char* source_id, const char* query);
     char* rakuyomi_get_manga(const char* source_id, const char* manga_id);
     char* rakuyomi_get_chapters(const char* source_id, const char* manga_id);
@@ -590,23 +592,25 @@ function AndroidFFIServer:request(request)
         addLog(self, "Installing source via FFI: " .. path)
         local source_id = path:match("/available%-sources/(.+)/install")
         if source_id then
-            local source_info = {
-                id = source_id,
-                name = source_id:gsub("^%l", string.upper),
-                version = 1,  -- Must be number to match available sources format
-                installed = true,
-                source_of_source = ""
-            }
-            -- Load existing sources from file, add new one, save back
-            local installed_sources = loadInstalledSourcesFromFile()
-            installed_sources[source_id] = source_info
-            local saved = saveInstalledSourcesToFile(installed_sources)
-            if saved then
-                addLog(self, "Source installed and saved: " .. source_id)
+            addLog(self, "Calling rakuyomi_install_source for: " .. source_id)
+            
+            -- Call the Rust FFI function to install the source
+            local install_result = self.lib.rakuyomi_install_source(source_id)
+            
+            if install_result == 0 then
+                addLog(self, "Source installed successfully: " .. source_id)
+                local source_info = {
+                    id = source_id,
+                    name = source_id:gsub("^%l", string.upper),
+                    version = 1,
+                    installed = true,
+                    source_of_source = ""
+                }
+                return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
             else
-                addLog(self, "Source installed (save failed): " .. source_id)
+                addLog(self, "Failed to install source: " .. source_id .. " (error code: " .. tostring(install_result) .. ")")
+                return { type = 'ERROR', status = 500, message = "Failed to install source", body = '{"error": "Install failed with code ' .. tostring(install_result) .. '"}' }
             end
-            return { type = 'SUCCESS', status = 200, body = rapidjson.encode(source_info) }
         else
             return { type = 'ERROR', status = 400, message = "Invalid source ID", body = '{"error": "Invalid source ID"}' }
         end

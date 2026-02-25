@@ -136,19 +136,285 @@ fn get_state() -> Option<&'static AppState> {
     STATE.get()
 }
 
+/// Source list item from remote
+#[derive(Debug, Deserialize)]
+struct SourceListItem {
+    id: String,
+    name: String,
+    #[serde(alias = "downloadURL")]
+    file: String,
+    #[serde(alias = "iconUrl")]
+    icon: Option<String>,
+    lang: String,
+    #[serde(alias = "nsfw")]
+    nsfw: i32,
+}
+
+/// Source information
+#[derive(Debug, Deserialize, Serialize)]
+struct SourceInfo {
+    id: String,
+    name: String,
+    lang: String,
+    #[serde(alias = "sourceOfSource")]
+    source_of_source: String,
+    installed: bool,
+}
+
 /// Get list of available sources
 /// Returns JSON string (caller must free with rakuyomi_free_string)
 #[no_mangle]
 pub unsafe extern "C" fn rakuyomi_get_sources() -> *mut c_char {
-    let Some(_state) = get_state() else {
-        return string_to_c_str(r#"{"error": "not initialized"}"#.to_string());
+    let Some(state) = get_state() else {
+        return string_to_c_str(r#"{"sources": [], "error": "not initialized"}"#.to_string());
     };
     
-    // Stub: return empty sources list
-    // In real implementation, this would load sources from the sources directory
-    let result = r#"{"sources": []}"#.to_string();
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        // Get source lists from settings
+        let settings_guard = state.settings.lock().await;
+        let settings_json: serde_json::Value = match serde_json::from_str(&*settings_guard) {
+            Ok(v) => v,
+            Err(_) => {
+                return r#"{"sources": []}"#.to_string();
+            }
+        };
+        drop(settings_guard);
+        
+        let source_lists = settings_json
+            .get("source_lists")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        
+        let mut all_sources: Vec<SourceInfo> = Vec::new();
+        
+        // Fetch from each source list
+        for url_value in source_lists {
+            let url = match url_value.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            
+            let domain = match reqwest::Url::parse(url) {
+                Ok(u) => u.domain().unwrap_or("unknown").to_string(),
+                Err(_) => continue,
+            };
+            
+            // Fetch the source list
+            match state.http_client.get(url).send().await {
+                Ok(response) => {
+                    match response.json::<serde_json::Value>().await {
+                        Ok(json) => {
+                            let items = if json.is_array() {
+                                json.as_array().cloned().unwrap_or_default()
+                            } else if let Some(arr) = json.get("sources").and_then(|v| v.as_array()) {
+                                arr.clone()
+                            } else {
+                                continue;
+                            };
+                            
+                            for item in items {
+                                if let Ok(source) = serde_json::from_value::<SourceListItem>(item) {
+                                    all_sources.push(SourceInfo {
+                                        id: source.id.clone(),
+                                        name: source.name,
+                                        lang: source.lang,
+                                        source_of_source: domain.clone(),
+                                        installed: false,
+                                    });
+                                }
+                            }
+                        }
+                        Err(_) => continue,
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+        
+        // Check which sources are already installed
+        let sources_dir = state.config_dir.join("sources");
+        if let Ok(entries) = std::fs::read_dir(&sources_dir) {
+            for entry in entries.flatten() {
+                if let Some(ext) = entry.path().extension() {
+                    if ext == "aix" {
+                        if let Some(stem) = entry.path().file_stem() {
+                            let id = stem.to_string_lossy().to_string();
+                            for source in &mut all_sources {
+                                if source.id == id {
+                                    source.installed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        match serde_json::to_string(&all_sources) {
+            Ok(json) => json,
+            Err(_) => r#"{"sources": []}"#.to_string(),
+        }
+    });
     
     string_to_c_str(result)
+}
+
+/// Get available sources lists (source lists URLs)
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_get_source_lists() -> *mut c_char {
+    let Some(state) = get_state() else {
+        return string_to_c_str(r#"[]"#.to_string());
+    };
+    
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        let settings_guard = state.settings.lock().await;
+        let settings_json: serde_json::Value = match serde_json::from_str(&*settings_guard) {
+            Ok(v) => v,
+            Err(_) => return r#"[]"#.to_string(),
+        };
+        drop(settings_guard);
+        
+        let source_lists = settings_json
+            .get("source_lists")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        
+        serde_json::to_string(&source_lists).unwrap_or_else(|_| r#"[]"#.to_string())
+    });
+    
+    string_to_c_str(result)
+}
+
+/// Install a source by downloading it from source lists
+/// 
+/// # Safety
+/// - source_id must be a valid null-terminated UTF-8 string
+/// - Returns 0 on success, -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn rakuyomi_install_source(source_id: *const c_char) -> c_int {
+    let Some(state) = get_state() else {
+        return -1; // Not initialized
+    };
+    
+    let source_id_str = match c_str_to_string(source_id) {
+        Some(s) => s,
+        None => return -1,
+    };
+    
+    let runtime = get_runtime();
+    
+    let result = runtime.block_on(async {
+        // Get source lists from settings
+        let settings_guard = state.settings.lock().await;
+        let settings_json: serde_json::Value = match serde_json::from_str(&*settings_guard) {
+            Ok(v) => v,
+            Err(_) => return -1,
+        };
+        drop(settings_guard);
+        
+        let source_lists = settings_json
+            .get("source_lists")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        
+        // Find the source in available lists
+        for url_value in source_lists {
+            let url = match url_value.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            
+            let base_url = match reqwest::Url::parse(url) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            
+            // Fetch the source list
+            let response = match state.http_client.get(url).send().await {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            
+            let json: serde_json::Value = match response.json().await {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            
+            let items = if json.is_array() {
+                json.as_array().cloned().unwrap_or_default()
+            } else if let Some(arr) = json.get("sources").and_then(|v| v.as_array()) {
+                arr.clone()
+            } else {
+                continue;
+            };
+            
+            // Find the source
+            for item in items {
+                let source_item: SourceListItem = match serde_json::from_value(item) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                
+                if source_item.id == source_id_str {
+                    // Build the download URL
+                    let aix_url = if source_item.file.starts_with("sources/") {
+                        match base_url.join(&source_item.file) {
+                            Ok(u) => u,
+                            Err(_) => continue,
+                        }
+                    } else {
+                        match base_url.join(&format!("sources/{}", source_item.file)) {
+                            Ok(u) => u,
+                            Err(_) => continue,
+                        }
+                    };
+                    
+                    // Download the .aix file
+                    eprintln!("Downloading source from: {}", aix_url);
+                    
+                    let aix_content = match state.http_client.get(aix_url).send().await {
+                        Ok(r) => match r.bytes().await {
+                            Ok(b) => b,
+                            Err(e) => {
+                                eprintln!("Failed to read response body: {}", e);
+                                continue;
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("Failed to download from {}: {}", aix_url, e);
+                            continue;
+                        }
+                    };
+                    
+                    // Save to sources directory
+                    let sources_dir = state.config_dir.join("sources");
+                    let target_path = sources_dir.join(format!("{}.aix", source_id_str));
+                    
+                    match tokio::fs::write(&target_path, &aix_content).await {
+                        Ok(_) => {
+                            eprintln!("Source installed at: {:?}", target_path);
+                            return 0; // Success
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to write source file: {}", e);
+                            return -1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        -1 // Source not found in any list
+    });
+    
+    result
 }
 
 /// Search for manga using MangaDex API
