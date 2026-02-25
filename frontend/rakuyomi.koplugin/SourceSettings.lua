@@ -219,7 +219,10 @@ function SourceSettings:init()
 
   self[1] = frame_container
 
-  self:focusElement(0, 0, FocusManager.FOCUS_DEFAULT)
+  -- Safe focus initialization (may not be available in all FocusManager versions)
+  if self.focusElement then
+    self:focusElement(0, 0, FocusManager.FOCUS_DEFAULT)
+  end
 end
 
 function SourceSettings:onReturn()
