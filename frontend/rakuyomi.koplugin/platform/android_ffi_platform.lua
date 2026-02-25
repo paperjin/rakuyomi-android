@@ -980,30 +980,13 @@ function AndroidFFIServer:request(request)
                 logger.info("Returning " .. tostring(#chapters) .. " real chapters from MangaDex")
                 return { type = 'SUCCESS', status = 200, body = rapidjson.encode(chapters) }
             else
-                logger.warn("Failed to fetch chapters: " .. tostring(err) .. ", falling back to mock")
+                logger.warn("Failed to fetch chapters: " .. tostring(err))
             end
         end
         
-        -- Return mock chapters as fallback
-        local mock_chapters = {}
-        for i = 1, 5 do
-            table.insert(mock_chapters, {
-                id = manga_id .. "-chapter-" .. tostring(i),
-                manga_id = manga_id,
-                source_id = source_id,
-                title = "Chapter " .. tostring(i) .. ": Mock Title",
-                chapter_num = i,
-                volume_num = 1,
-                lang = "en",
-                scanlator = "Mock Scans",
-                read = false,
-                downloaded = false,
-                locked = false,
-            })
-        end
-        
-        -- Return chapters as direct array (matching Backend.listCachedChapters response format)
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_chapters) }
+        -- Return empty chapters if all sources failed
+        addLog(self, "All chapter sources failed, returning empty")
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({}) }
         
     elseif path:match("^/mangas/[^/]+/[^/]+/preferred%-scanlator$") then
         -- GET/POST /mangas/{source}/{id}/preferred-scanlator
@@ -1181,26 +1164,13 @@ function AndroidFFIServer:request(request)
         -- POST /mangas/{source}/{id}/refresh-details - Refreshes manga details
         local source_id, manga_id = path:match("^/mangas/([^/]+)/([^/]+)/refresh%-details$")
         addLog(self, "Refreshing manga details via FFI: source=" .. tostring(source_id) .. " manga=" .. tostring(manga_id))
-        -- Same as details for now - just return the current details
-        -- In a full implementation, this would trigger a refresh from the source
-        local response_body = {{ id = manga_id, title = "Manga " .. manga_id:sub(1, 8), author = "Unknown", description = "", cover_url = "", status = "ongoing", source = { id = source_id, name = "MangaDex" }, in_library = false, unread_chapters_count = 0 }, 0}
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(response_body) }
+        -- Return empty success - details will be fetched on next request
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({}) }
         
-    elseif path:match("^/details") then
-        -- Legacy fallback
-        addLog(self, "Fetching manga details via FFI (legacy)")
-        local mock_details = {{
-            id = "mock",
-            title = "Mock Manga",
-            author = "Unknown",
-            description = "No description",
-            cover_url = "",
-            status = "ongoing",
-            source = { id = "en.mangadex", name = "MangaDex" },
-            in_library = false,
-            unread_chapters_count = 0,
-        }, 0}
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_details) }
+    elseif path:match("^/details$") then
+        -- Legacy fallback - return empty/error
+        addLog(self, "Fetching manga details via FFI (legacy) - not implemented")
+        return { type = 'ERROR', status = 404, message = "Legacy details endpoint not supported", body = '{"error": "Not implemented"}' }
         
     elseif path == "/mangas" or path:match("^/mangas%?") or path:match("^/mangas/") then
         addLog(self, "Fetching mangas via FFI: " .. path)
@@ -1261,16 +1231,9 @@ function AndroidFFIServer:request(request)
             end
         end
         
-        -- Fallback: return mock pages if no source info or FFI call failed
-        addLog(self, "No source info or FFI failed, returning mock pages")
-        local mock_pages = {}
-        for i = 1, 5 do
-            table.insert(mock_pages, {
-                index = i,
-                url = "https://example.com/mock-page-" .. tostring(i) .. ".jpg",
-            })
-        end
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode(mock_pages) }
+        -- Fallback: return empty if no source info or FFI call failed
+        addLog(self, "No source info or FFI failed, returning empty pages")
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({}) }
         
     elseif path:match("^/jobs/download%-chapter") then
         addLog(self, "Creating download chapter job via FFI")
@@ -1292,8 +1255,8 @@ function AndroidFFIServer:request(request)
         local job_id = path:match("^/jobs/([^/]+)$")
         addLog(self, "Job details via FFI: job_id=" .. tostring(job_id))
         
-        -- Check if we have downloaded pages to return
-        local result = {"/sdcard/koreader/rakuyomi/mock-chapter.cbz", {}}
+        -- Return empty job result
+        local result = {"", {}}
         
         if _G.downloaded_pages then
             for chapter_id, pages in pairs(_G.downloaded_pages) do
