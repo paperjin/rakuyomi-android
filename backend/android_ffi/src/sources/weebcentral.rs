@@ -9,7 +9,10 @@ const FETCH_LIMIT: i32 = 24;
 
 /// Search WeebCentral
 pub async fn search_weebcentral(query: &str, page: i32) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     
     let offset = (page - 1) * FETCH_LIMIT;
     
@@ -40,7 +43,10 @@ pub async fn search_weebcentral(query: &str, page: i32) -> Result<serde_json::Va
 
 /// Get manga details
 pub async fn get_manga_details(manga_id: &str) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}{}", BASE_URL, manga_id);
 
     let response = client
@@ -60,7 +66,10 @@ pub async fn get_manga_details(manga_id: &str) -> Result<serde_json::Value, Stri
 
 /// Get chapter list
 pub async fn get_chapter_list(manga_id: &str) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     
     // WeebCentral uses a separate endpoint for chapters
     let base_manga_url = if let Some(last_slash_pos) = manga_id.rfind('/') {
@@ -88,7 +97,10 @@ pub async fn get_chapter_list(manga_id: &str) -> Result<serde_json::Value, Strin
 
 /// Get page list for a chapter
 pub async fn get_page_list(_manga_id: &str, chapter_id: &str) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}{}/images?is_prev=False&reading_style=long_strip", 
         BASE_URL, chapter_id);
 

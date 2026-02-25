@@ -8,7 +8,10 @@ const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 
 /// Search mangapill
 pub async fn search_mangapill(query: &str, page: i32) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     
     let url = if query.is_empty() {
         // Get recent updates
@@ -36,7 +39,10 @@ pub async fn search_mangapill(query: &str, page: i32) -> Result<serde_json::Valu
 
 /// Get manga details
 pub async fn get_manga_details(manga_id: &str) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}{}", BASE_URL, manga_id);
 
     let response = client
@@ -56,7 +62,10 @@ pub async fn get_manga_details(manga_id: &str) -> Result<serde_json::Value, Stri
 
 /// Get chapter list
 pub async fn get_chapter_list(manga_id: &str) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}{}", BASE_URL, manga_id);
 
     let response = client
@@ -76,7 +85,10 @@ pub async fn get_chapter_list(manga_id: &str) -> Result<serde_json::Value, Strin
 
 /// Get page list for a chapter
 pub async fn get_page_list(_manga_id: &str, chapter_id: &str) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}{}", BASE_URL, chapter_id);
 
     let response = client
