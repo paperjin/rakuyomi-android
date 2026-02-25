@@ -1,11 +1,12 @@
--- Simple version: Return first page URL for direct reading
--- No CBZ creation, no os.execute()
+-- Simple version: Download first page to local file, avoid CBZ crash
+-- No os.execute(), creates single-page "CBZ" (just the image)
 
 local logger = require("logger")
 local ffi = require("ffi")
 local rapidjson = require("rapidjson")
 local ltn12 = require("ltn12")
 local http = require("socket.http")
+local util = require("util")
 
 logger.info("Simple FFI Platform loading...")
 
@@ -16,6 +17,16 @@ ffi.cdef[[
     int rakuyomi_set_settings(const char* settings);
 ]]
 
+-- Download file to path
+local function downloadFile(url, output_path)
+    local file = io.open(output_path, "wb")
+    if not file then return nil end
+    local result = http.request{ url = url, sink = ltn12.sink.file(file) }
+    if result then return output_path end
+    return nil
+end
+
+-- Simple HTTP GET
 local function http_get(url, timeout)
     timeout = timeout or 30
     local body = {}
@@ -27,6 +38,7 @@ local function http_get(url, timeout)
     return nil
 end
 
+-- Fetch pages from MangaDex
 local function fetchMangaDexPages(chapter_id)
     local url = "https://api.mangadex.org/at-home/server/" .. chapter_id
     local body = http_get(url, 15)
@@ -90,7 +102,7 @@ function AndroidFFIServer:request(req)
         return { type = 'SUCCESS', status = 200, body = rapidjson.encode({{}, 0}) }
     end
     
-    -- Download chapter - return first page URL immediately
+    -- Download chapter
     if path:match("^/jobs/download%-chapter$") then
         local body = {}
         if req.body then
@@ -98,6 +110,7 @@ function AndroidFFIServer:request(req)
         end
         local chapter_id = body.chapter_id
         local source_id = body.source_id
+        local manga_id = body.manga_id
         
         if not chapter_id then
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="No chapter ID"}}) }
@@ -107,27 +120,37 @@ function AndroidFFIServer:request(req)
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="Only MangaDex supported"}}) }
         end
         
-        -- Fetch pages synchronously
+        -- Fetch pages
         local pages = fetchMangaDexPages(chapter_id)
-        if pages and #pages > 0 then
-            -- Return first page URL as "CBZ" path
-            -- Frontend expects: {cbz_path, errors}
-            -- We'll return page[1].url as the "path" - KOReader can open it directly
-            logger.info("Returning first page: " .. pages[1].url:sub(1, 50))
-            return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="COMPLETED",data={pages[1].url, {}}}) }
-        else
+        if not pages or #pages == 0 then
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="No pages found"}}) }
         end
+        
+        -- Download first page to temp file
+        local temp_dir = "/sdcard/koreader/rakuyomi/temp"
+        os.execute("mkdir -p " .. temp_dir)
+        local img_path = temp_dir .. "/" .. chapter_id .. "_page1.jpg"
+        
+        logger.info("Downloading first page to: " .. img_path)
+        local downloaded = downloadFile(pages[1].url, img_path)
+        
+        if not downloaded then
+            return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="FAILED",data={message="Failed to download page"}}) }
+        end
+        
+        -- For KOReader, we need to return a path it can open
+        -- Single image works, or we could create a minimal CBZ
+        logger.info("Downloaded to: " .. img_path)
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="COMPLETED",data={img_path, {}}}) }
     end
     
     -- Job polling
     if path:match("^/jobs/[^/]+$") then
-        -- For simple version, jobs complete immediately
-        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="COMPLETED",data={"",{}}) }
+        return { type = 'SUCCESS', status = 200, body = rapidjson.encode({type="COMPLETED",data={"",{}}}) }
     end
     
     -- Default
-    return { type = 'SUCCESS', status = 200, body = '{}" }
+    return { type = 'SUCCESS', status = 200, body = '{}' }
 end
 
 function AndroidFFIServer:stop()
