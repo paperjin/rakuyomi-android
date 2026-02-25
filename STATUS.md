@@ -83,17 +83,18 @@ git clone https://github.com/paperjin/rakuyomi-android.git
 rm -rf /sdcard/koreader/plugins/rakuyomi.koplugin
 cp -r rakuyomi-android/frontend/rakuyomi.koplugin /sdcard/koreader/plugins/
 
-# IMPORTANT: Copy library to internal storage
-adb shell cp /sdcard/koreader/plugins/rakuyomi.koplugin/libs/librakuyomi.so /data/data/org.koreader.launcher/files/librakuyomi.so
-adb shell chmod 755 /data/data/org.koreader.launcher/files/librakuyomi.so
+# IMPORTANT: Copy library to internal storage using cat (preserves SELinux context)
+adb shell "cat /sdcard/koreader/plugins/rakuyomi.koplugin/libs/librakuyomi.so \&gt; /data/data/org.koreader.launcher/files/librakuyomi.so"
+adb shell chmod 700 /data/data/org.koreader.launcher/files/librakuyomi.so
 
-# CRITICAL: Fix SELinux security context (Android 10+)
-adb shell restorecon /data/data/org.koreader.launcher/files/librakuyomi.so
+# CRITICAL: Fix SELinux MLS categories (Android 10+)
+adb shell chcon u:object_r:app_data_file:s0:c512,c768 /data/data/org.koreader.launcher/files/librakuyomi.so
 ```
 
-**Note:** The `restorecon` step fixes Android SELinux permissions that prevent
-KOReader from loading the library. Without it you'll get:
-"Failed to load rakuyomi library: Could not find librakuyomi.so"
+**Note:** The `cat` + `chcon` steps are CRITICAL:
+- Using `cat` creates the file with proper ownership
+- `chcon` adds MLS categories (c512,c768) that allow KOReader to access it
+- Without these, SELinux blocks library loading with "Could not find librakuyomi.so"
 
 ### Build From Source (Steam Deck/Linux)
 ```bash
