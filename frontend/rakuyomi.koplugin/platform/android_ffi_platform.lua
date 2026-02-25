@@ -213,21 +213,42 @@ local function fetchMangaDexPages(chapter_id)
         return nil, err
     end
     
+    logger.info("MangaDex response length: " .. tostring(#body))
+    
     local ok, result = pcall(function() return rapidjson.decode(body) end)
     if not ok then
         logger.warn("JSON parse error in pages: " .. tostring(result))
         return nil, "JSON parse error"
     end
     
-    if not result.chapter or not result.chapter.data then
-        logger.warn("No chapter data in response")
-        return nil, "No pages available"
+    -- Check for API errors
+    if result.errors and #result.errors > 0 then
+        logger.warn("MangaDex API error: " .. rapidjson.encode(result.errors))
+        return nil, "API error"
+    end
+    
+    if not result.chapter or not result.chapter.hash then
+        logger.warn("No chapter data in response: " .. rapidjson.encode(result))
+        return nil, "No chapter data available"
     end
     
     -- Build page URLs
     local base_url = result.baseUrl or "https://uploads.mangadex.org"
     local hash = result.chapter.hash
     local data = result.chapter.data
+    
+    -- If no data, try dataSaver
+    if not data or #data == 0 then
+        data = result.chapter.dataSaver
+        logger.info("Using dataSaver mode")
+    end
+    
+    if not data or #data == 0 then
+        logger.warn("No pages in response (neither data nor dataSaver)")
+        return nil, "No pages available"
+    end
+    
+    logger.info("Building URLs with base=" .. tostring(base_url) .. " hash=" .. tostring(hash) .. " files=" .. tostring(#data))
     
     local pages = {}
     for i, filename in ipairs(data) do
