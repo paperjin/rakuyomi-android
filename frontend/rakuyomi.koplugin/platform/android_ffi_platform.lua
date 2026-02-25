@@ -1341,12 +1341,11 @@ function AndroidFFIServer:request(request)
             end
             
             if pages and #pages > 0 then
-                addLog(self, "Creating CBZ from " .. tostring(#pages) .. " pages")
+                addLog(self, "Downloading " .. tostring(#pages) .. " pages to folder")
                 
-                -- Prepare CBZ path
-                local cbz_dir = "/sdcard/koreader/rakuyomi/chapters"
-                os.execute("mkdir -p " .. cbz_dir)
-                local cbz_path = cbz_dir .. "/" .. (manga_id or "unknown") .. "_" .. chapter_id .. ".cbz"
+                -- Prepare output folder (not CBZ - zip crashes on Android)
+                local chapter_dir = "/sdcard/koreader/rakuyomi/chapters/" .. (manga_id or "unknown") .. "_" .. chapter_id
+                os.execute("mkdir -p " .. chapter_dir)
                 
                 -- Get URLs as JSON array
                 local urls = {}
@@ -1355,18 +1354,18 @@ function AndroidFFIServer:request(request)
                 end
                 local urls_json = rapidjson.encode(urls)
                 
-                -- Call FFI to create CBZ (wrapped in pcall for safety)
+                -- Call FFI to download pages to folder (wrapped in pcall for safety)
                 addLog(self, "Calling rakuyomi_create_cbz FFI via pcall")
-                addLog(self, "CBZ path: " .. cbz_path)
+                addLog(self, "Output folder: " .. chapter_dir)
                 addLog(self, "URLs count: " .. tostring(#urls))
                 
                 local ffi_ok, result_ptr = pcall(function()
-                    return self.lib.rakuyomi_create_cbz(cbz_path, urls_json)
+                    return self.lib.rakuyomi_create_cbz(chapter_dir, urls_json)
                 end)
                 
                 if not ffi_ok then
                     addLog(self, "FFI call CRASHED: " .. tostring(result_ptr))
-                    return { type = 'ERROR', status = 500, body = rapidjson.encode("CBZ creation failed: " .. tostring(result_ptr)) }
+                    return { type = 'ERROR', status = 500, body = rapidjson.encode("Download failed: " .. tostring(result_ptr)) }
                 end
                 
                 addLog(self, "rakuyomi_create_cbz returned: " .. tostring(result_ptr))
@@ -1377,14 +1376,14 @@ function AndroidFFIServer:request(request)
                     
                     local ok, result_data = pcall(function() return rapidjson.decode(result_str) end)
                     if ok and result_data and result_data.success then
-                        addLog(self, "CBZ created: " .. result_data.path)
+                        addLog(self, "Download complete: " .. result_data.path)
                         -- Store for job polling
-                        _G.cbz_result = result_data.path
-                        -- Return job ID (poll will return the CBZ path)
+                        _G.cbz_result = chapter_dir
+                        -- Return job ID (poll will return the folder path)
                         local job_id = "job-" .. tostring(os.time()) .. "-" .. chapter_id
                         return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_id) }
                     else
-                        addLog(self, "CBZ failed: " .. (result_data and result_data.error or "unknown"))
+                        addLog(self, "Download failed: " .. (result_data and result_data.error or "unknown"))
                     end
                 else
                     addLog(self, "rakuyomi_create_cbz returned nil - FFI may have crashed")
@@ -1405,14 +1404,14 @@ function AndroidFFIServer:request(request)
         local job_id = path:match("^/jobs/([^/]+)$")
         addLog(self, "Job details via FFI: job_id=" .. tostring(job_id))
         
-        -- Check for CBZ result
+        -- Check for download result (folder path now, not CBZ due to Android crashes)
         if _G.cbz_result then
-            local cbz_path = _G.cbz_result
+            local result_path = _G.cbz_result
             _G.cbz_result = nil  -- Clear after returning
-            addLog(self, "Returning CBZ result: " .. cbz_path)
+            addLog(self, "Returning download result: " .. result_path)
             local job_details = {
                 type = "COMPLETED",
-                data = {cbz_path, {}}
+                data = {result_path, {}}  -- folder path, empty errors
             }
             return { type = 'SUCCESS', status = 200, body = rapidjson.encode(job_details) }
         end

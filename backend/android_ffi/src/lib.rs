@@ -1119,51 +1119,113 @@ pub unsafe extern "C" fn rakuyomi_get_weebcentral_pages(
     string_to_c_str(result)
 }
 
-mod cbz;
+// mod cbz - removed, causes Android crashes
 
-pub use cbz::create_cbz;
-
-/// Create CBZ file from image URLs
-/// cbz_path: output path for CBZ file
+/// Simple chapter download - creates folder and downloads images
+/// output_dir: output directory for images (not CBZ)
 /// urls_json: JSON array of image URLs
-/// Returns: JSON with success status and path or error message
+/// Returns: JSON with success status and folder path
 #[no_mangle]
 pub unsafe extern "C" fn rakuyomi_create_cbz(
-    cbz_path: *const c_char,
+    output_dir: *const c_char,
     urls_json: *const c_char,
 ) -> *mut c_char {
-    let cbz_path_str = match c_str_to_string(cbz_path) {
-        Some(s) => s,
-        None => return string_to_c_str(r#"{"success":false,"error":"Invalid CBZ path"}"#.to_string()),
-    };
+    // Wrap everything in catch_unwind to prevent crashes
+    match std::panic::catch_unwind(|| {
+        rakuyomi_create_cbz_inner(output_dir, urls_json)
+    }) {
+        Ok(result) => result,
+        Err(e) => {
+            let error_msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Unknown panic in FFI".to_string()
+            };
+            string_to_c_str(format!(r#"{{"success":false,"error":"Panic: {}"}}"#, error_msg))
+        }
+    }
+}
 
-    let urls_str = match c_str_to_string(urls_json) {
+fn rakuyomi_create_cbz_inner(
+    output_dir: *const c_char,
+    urls_json: *const c_char,
+) -> *mut c_char {
+    let output_dir_str = unsafe { match c_str_to_string(output_dir) {
+        Some(s) => s,
+        None => return string_to_c_str(r#"{"success":false,"error":"Invalid output directory"}"#.to_string()),
+    }};
+
+    let urls_str = unsafe { match c_str_to_string(urls_json) {
         Some(s) => s,
         None => return string_to_c_str(r#"{"success":false,"error":"Invalid URLs"}"#.to_string()),
-    };
+    }};
 
     let urls: Vec<String> = match serde_json::from_str(&urls_str) {
         Ok(u) => u,
         Err(_) => return string_to_c_str(r#"{"success":false,"error":"Invalid JSON"}"#.to_string()),
     };
 
-    let runtime = get_runtime();
+    let runtime = unsafe { get_runtime() };
 
     let result = runtime.block_on(async {
-        match cbz::create_cbz(&cbz_path_str, urls).await {
-            Ok(path) => {
-                serde_json::to_string(&serde_json::json!({
-                    "success": true,
-                    "path": path
-                })).unwrap_or_else(|_| r#"{"success":false}"#.to_string())
-            }
-            Err(e) => {
-                serde_json::to_string(&serde_json::json!({
-                    "success": false,
-                    "error": e
-                })).unwrap_or_else(|_| r#"{"success":false}"#.to_string())
+        // Create output directory
+        if let Err(e) = tokio::fs::create_dir_all(&output_dir_str).await {
+            return serde_json::to_string(&serde_json::json!({
+                "success": false,
+                "error": format!("Failed to create directory: {}", e)
+            })).unwrap();
+        }
+
+        // Download all images
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build() {
+            Ok(c) => c,
+            Err(e) => return serde_json::to_string(&serde_json::json!({
+                "success": false,
+                "error": format!("Failed to create HTTP client: {}", e)
+            })).unwrap()
+        };
+
+        let mut downloaded = 0;
+        for (i, url) in urls.iter().enumerate() {
+            let filename = format!("{:03}.jpg", i + 1);
+            let filepath = format!("{}/{}", output_dir_str, filename);
+
+            match client.get(url).send().await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        match response.bytes().await {
+                            Ok(bytes) => {
+                                if tokio::fs::write(&filepath, &bytes).await.is_ok() {
+                                    downloaded += 1;
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                }
+                Err(_) => {}
             }
         }
+
+        // Create a simple JSON file with image list
+        let info_path = format!("{}/chapter.json", output_dir_str);
+        let info = serde_json::json!({
+            "images": urls.len(),
+            "downloaded": downloaded,
+            "first_page": format!("{}/001.jpg", output_dir_str)
+        });
+        let _ = tokio::fs::write(&info_path, serde_json::to_string(&info).unwrap()).await;
+
+        serde_json::to_string(&serde_json::json!({
+            "success": downloaded > 0,
+            "path": format!("{}/001.jpg", output_dir_str),
+            "folder": output_dir_str,
+            "images": downloaded
+        })).unwrap()
     });
 
     string_to_c_str(result)
